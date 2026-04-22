@@ -493,7 +493,7 @@ async function run() {
         const withChart = core.getInput('with-chart') !== 'false';
         const showAbsoluteNumbers = core.getInput('show-absolute-numbers') !== 'false';
         const onlyChangedFiles = core.getInput('only-changed-files') === 'true';
-        const signature = core.getInput('signature') || 'saci-coverage-report';
+        const signature = core.getInput('signature') || 'Saci - Coverage Report';
         if (!fs.existsSync(file)) {
             throw new Error(`Coverage file not found: ${file}`);
         }
