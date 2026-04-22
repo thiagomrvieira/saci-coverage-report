@@ -44,7 +44,7 @@ inputs:
   signature:
     description: 'Custom signature at the bottom of the comment'
     required: false
-    default: 'Saci - Coverage Report'
+    default: 'saci-coverage-report'
 
 outputs:
   line-coverage:
