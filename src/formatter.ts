@@ -17,6 +17,7 @@ interface FormatterOptions {
   commitSha: string
   baseReport: CoverageReport | null
   changedFiles: string[]
+  repoUrl: string
 }
 
 function fmt(covered: number, total: number, showAbsolute: boolean): string {
@@ -123,11 +124,18 @@ function dirSummaryMetrics(
   return fmt(coveredStmts, totalStmts, showAbsolute)
 }
 
+function fileLink(displayPath: string, repoUrl: string): string {
+  const name = fileName(displayPath)
+  if (!repoUrl) return name
+  return `[${name}](${repoUrl}/${displayPath})`
+}
+
 function buildDirTable(
   dirFiles: FileMetrics[],
   baseFiles: Map<string, FileMetrics> | null,
   showAbsolute: boolean,
   hasDelta: boolean,
+  repoUrl: string,
 ): string {
   dirFiles.sort((a, b) => {
     const aPct = percentage(a.metrics.coveredStatements, a.metrics.statements)
@@ -146,7 +154,7 @@ function buildDirTable(
   }
 
   for (const f of dirFiles) {
-    const name = fileName(f.displayPath)
+    const name = fileLink(f.displayPath, repoUrl)
     const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute)
     const methods = fmt(f.metrics.coveredMethods, f.metrics.methods, showAbsolute)
     const branches = fmt(f.metrics.coveredConditionals, f.metrics.conditionals, showAbsolute)
@@ -177,6 +185,7 @@ function fileTable(
   showAbsolute: boolean,
   onlyChanged: boolean,
   changedFiles: string[],
+  repoUrl: string,
 ): string {
   let filteredFiles = files.filter(
     (f) => f.metrics.statements > 0 || f.metrics.methods > 0,
@@ -209,7 +218,7 @@ function fileTable(
     const dirCoverage = dirSummaryMetrics(dirFiles, showAbsolute)
     const fileCount = dirFiles.length
 
-    const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta)
+    const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl)
 
     sections.push(
       `<details${openAttr}>\n<summary><b>${dir}</b> — ${dirCoverage} (${fileCount} files)</summary>\n\n${table}\n\n</details>`,
@@ -332,6 +341,7 @@ export function formatReport(
       options.showAbsoluteNumbers,
       options.onlyChangedFiles,
       options.changedFiles,
+      options.repoUrl,
     ),
   )
 

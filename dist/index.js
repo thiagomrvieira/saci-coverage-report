@@ -188,7 +188,13 @@ function dirSummaryMetrics(dirFiles, showAbsolute) {
     }
     return fmt(coveredStmts, totalStmts, showAbsolute);
 }
-function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta) {
+function fileLink(displayPath, repoUrl) {
+    const name = fileName(displayPath);
+    if (!repoUrl)
+        return name;
+    return `[${name}](${repoUrl}/${displayPath})`;
+}
+function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl) {
     dirFiles.sort((a, b) => {
         const aPct = (0, types_1.percentage)(a.metrics.coveredStatements, a.metrics.statements);
         const bPct = (0, types_1.percentage)(b.metrics.coveredStatements, b.metrics.statements);
@@ -204,7 +210,7 @@ function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta) {
         rows.push('|------|-------|---------|----------|------|');
     }
     for (const f of dirFiles) {
-        const name = fileName(f.displayPath);
+        const name = fileLink(f.displayPath, repoUrl);
         const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute);
         const methods = fmt(f.metrics.coveredMethods, f.metrics.methods, showAbsolute);
         const branches = fmt(f.metrics.coveredConditionals, f.metrics.conditionals, showAbsolute);
@@ -228,7 +234,7 @@ function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta) {
     }
     return rows.join('\n');
 }
-function fileTable(files, baseFiles, showAbsolute, onlyChanged, changedFiles) {
+function fileTable(files, baseFiles, showAbsolute, onlyChanged, changedFiles, repoUrl) {
     let filteredFiles = files.filter((f) => f.metrics.statements > 0 || f.metrics.methods > 0);
     if (onlyChanged && baseFiles) {
         filteredFiles = filteredFiles.filter((f) => {
@@ -253,7 +259,7 @@ function fileTable(files, baseFiles, showAbsolute, onlyChanged, changedFiles) {
         const openAttr = affected ? ' open' : '';
         const dirCoverage = dirSummaryMetrics(dirFiles, showAbsolute);
         const fileCount = dirFiles.length;
-        const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta);
+        const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl);
         sections.push(`<details${openAttr}>\n<summary><b>${dir}</b> — ${dirCoverage} (${fileCount} files)</summary>\n\n${table}\n\n</details>`);
     }
     return sections.join('\n\n');
@@ -327,7 +333,7 @@ function formatReport(current, options) {
     const baseFileMap = options.baseReport
         ? new Map(options.baseReport.files.map((f) => [f.displayPath, f]))
         : null;
-    parts.push(fileTable(current.files, baseFileMap, options.showAbsoluteNumbers, options.onlyChangedFiles, options.changedFiles));
+    parts.push(fileTable(current.files, baseFileMap, options.showAbsoluteNumbers, options.onlyChangedFiles, options.changedFiles, options.repoUrl));
     const crapSection = topCrapTable(current.allMethods, options.crapThreshold, options.topCrapLimit);
     if (crapSection)
         parts.push(crapSection);
@@ -438,6 +444,8 @@ async function run() {
                 core.info('Could not fetch PR files, all groups will be open.');
             }
         }
+        const { owner, repo } = github.context.repo;
+        const repoUrl = `https://github.com/${owner}/${repo}/blob/${commitSha}`;
         const markdown = (0, formatter_1.formatReport)(current, {
             showAbsoluteNumbers,
             withChart,
@@ -448,6 +456,7 @@ async function run() {
             commitSha,
             baseReport,
             changedFiles,
+            repoUrl,
         });
         await (0, comment_1.postComment)(markdown, signature);
         const lineCoverage = (0, types_1.percentage)(current.projectMetrics.coveredStatements, current.projectMetrics.statements);

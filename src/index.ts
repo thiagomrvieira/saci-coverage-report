@@ -64,6 +64,9 @@ async function run(): Promise<void> {
       }
     }
 
+    const {owner, repo} = github.context.repo
+    const repoUrl = `https://github.com/${owner}/${repo}/blob/${commitSha}`
+
     const markdown = formatReport(current, {
       showAbsoluteNumbers,
       withChart,
@@ -74,6 +77,7 @@ async function run(): Promise<void> {
       commitSha,
       baseReport,
       changedFiles,
+      repoUrl,
     })
 
     await postComment(markdown, signature)
