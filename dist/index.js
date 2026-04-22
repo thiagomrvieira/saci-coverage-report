@@ -159,6 +159,21 @@ function summaryTable(current, base, showAbsolute) {
     }
     return rows.join('\n');
 }
+function groupByDirectory(files) {
+    const groups = new Map();
+    for (const f of files) {
+        const lastSlash = f.displayPath.lastIndexOf('/');
+        const dir = lastSlash >= 0 ? f.displayPath.substring(0, lastSlash) : '.';
+        if (!groups.has(dir))
+            groups.set(dir, []);
+        groups.get(dir).push(f);
+    }
+    return groups;
+}
+function fileName(displayPath) {
+    const lastSlash = displayPath.lastIndexOf('/');
+    return lastSlash >= 0 ? displayPath.substring(lastSlash + 1) : displayPath;
+}
 function fileTable(files, baseFiles, showAbsolute, onlyChanged) {
     let filteredFiles = files.filter((f) => f.metrics.statements > 0 || f.metrics.methods > 0);
     if (onlyChanged && baseFiles) {
@@ -174,13 +189,12 @@ function fileTable(files, baseFiles, showAbsolute, onlyChanged) {
     if (filteredFiles.length === 0) {
         return '_No files with coverable lines._';
     }
-    filteredFiles.sort((a, b) => {
-        const aPct = (0, types_1.percentage)(a.metrics.coveredStatements, a.metrics.statements);
-        const bPct = (0, types_1.percentage)(b.metrics.coveredStatements, b.metrics.statements);
-        return aPct - bPct;
-    });
+    const hasDelta = baseFiles !== null;
+    const groups = groupByDirectory(filteredFiles);
+    const sortedDirs = Array.from(groups.keys()).sort();
     const rows = [];
-    if (baseFiles) {
+    const emptyCols = hasDelta ? '| | | | | |' : '| | | | |';
+    if (hasDelta) {
         rows.push('| File | Lines | Methods | Branches | CRAP | Delta |');
         rows.push('|------|-------|---------|----------|------|-------|');
     }
@@ -188,26 +202,36 @@ function fileTable(files, baseFiles, showAbsolute, onlyChanged) {
         rows.push('| File | Lines | Methods | Branches | CRAP |');
         rows.push('|------|-------|---------|----------|------|');
     }
-    for (const f of filteredFiles) {
-        const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute);
-        const methods = fmt(f.metrics.coveredMethods, f.metrics.methods, showAbsolute);
-        const branches = fmt(f.metrics.coveredConditionals, f.metrics.conditionals, showAbsolute);
-        const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '-';
-        if (baseFiles) {
-            const baseFile = baseFiles.get(f.displayPath);
-            let deltaCol;
-            if (baseFile) {
-                const curPct = (0, types_1.percentage)(f.metrics.coveredStatements, f.metrics.statements);
-                const basePct = (0, types_1.percentage)(baseFile.metrics.coveredStatements, baseFile.metrics.statements);
-                deltaCol = deltaStr(curPct, basePct);
+    for (const dir of sortedDirs) {
+        const dirFiles = groups.get(dir);
+        dirFiles.sort((a, b) => {
+            const aPct = (0, types_1.percentage)(a.metrics.coveredStatements, a.metrics.statements);
+            const bPct = (0, types_1.percentage)(b.metrics.coveredStatements, b.metrics.statements);
+            return aPct - bPct;
+        });
+        rows.push(`| **${dir}** ${emptyCols}`);
+        for (const f of dirFiles) {
+            const name = fileName(f.displayPath);
+            const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute);
+            const methods = fmt(f.metrics.coveredMethods, f.metrics.methods, showAbsolute);
+            const branches = fmt(f.metrics.coveredConditionals, f.metrics.conditionals, showAbsolute);
+            const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '-';
+            if (hasDelta) {
+                const baseFile = baseFiles.get(f.displayPath);
+                let deltaCol;
+                if (baseFile) {
+                    const curPct = (0, types_1.percentage)(f.metrics.coveredStatements, f.metrics.statements);
+                    const basePct = (0, types_1.percentage)(baseFile.metrics.coveredStatements, baseFile.metrics.statements);
+                    deltaCol = deltaStr(curPct, basePct);
+                }
+                else {
+                    deltaCol = ':sparkles: new';
+                }
+                rows.push(`| \u00A0\u00A0\u00A0\u00A0${name} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`);
             }
             else {
-                deltaCol = ':sparkles: new';
+                rows.push(`| \u00A0\u00A0\u00A0\u00A0${name} | ${lines} | ${methods} | ${branches} | ${crap} |`);
             }
-            rows.push(`| ${f.displayPath} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`);
-        }
-        else {
-            rows.push(`| ${f.displayPath} | ${lines} | ${methods} | ${branches} | ${crap} |`);
         }
     }
     return rows.join('\n');

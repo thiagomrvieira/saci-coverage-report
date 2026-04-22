@@ -84,6 +84,26 @@ function summaryTable(
   return rows.join('\n')
 }
 
+function groupByDirectory(
+  files: FileMetrics[],
+): Map<string, FileMetrics[]> {
+  const groups = new Map<string, FileMetrics[]>()
+
+  for (const f of files) {
+    const lastSlash = f.displayPath.lastIndexOf('/')
+    const dir = lastSlash >= 0 ? f.displayPath.substring(0, lastSlash) : '.'
+    if (!groups.has(dir)) groups.set(dir, [])
+    groups.get(dir)!.push(f)
+  }
+
+  return groups
+}
+
+function fileName(displayPath: string): string {
+  const lastSlash = displayPath.lastIndexOf('/')
+  return lastSlash >= 0 ? displayPath.substring(lastSlash + 1) : displayPath
+}
+
 function fileTable(
   files: FileMetrics[],
   baseFiles: Map<string, FileMetrics> | null,
@@ -114,15 +134,14 @@ function fileTable(
     return '_No files with coverable lines._'
   }
 
-  filteredFiles.sort((a, b) => {
-    const aPct = percentage(a.metrics.coveredStatements, a.metrics.statements)
-    const bPct = percentage(b.metrics.coveredStatements, b.metrics.statements)
-    return aPct - bPct
-  })
+  const hasDelta = baseFiles !== null
+  const groups = groupByDirectory(filteredFiles)
+  const sortedDirs = Array.from(groups.keys()).sort()
 
   const rows: string[] = []
+  const emptyCols = hasDelta ? '| | | | | |' : '| | | | |'
 
-  if (baseFiles) {
+  if (hasDelta) {
     rows.push('| File | Lines | Methods | Branches | CRAP | Delta |')
     rows.push('|------|-------|---------|----------|------|-------|')
   } else {
@@ -130,47 +149,65 @@ function fileTable(
     rows.push('|------|-------|---------|----------|------|')
   }
 
-  for (const f of filteredFiles) {
-    const lines = fmt(
-      f.metrics.coveredStatements,
-      f.metrics.statements,
-      showAbsolute,
-    )
-    const methods = fmt(
-      f.metrics.coveredMethods,
-      f.metrics.methods,
-      showAbsolute,
-    )
-    const branches = fmt(
-      f.metrics.coveredConditionals,
-      f.metrics.conditionals,
-      showAbsolute,
-    )
-    const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '-'
+  for (const dir of sortedDirs) {
+    const dirFiles = groups.get(dir)!
+    dirFiles.sort((a, b) => {
+      const aPct = percentage(
+        a.metrics.coveredStatements,
+        a.metrics.statements,
+      )
+      const bPct = percentage(
+        b.metrics.coveredStatements,
+        b.metrics.statements,
+      )
+      return aPct - bPct
+    })
 
-    if (baseFiles) {
-      const baseFile = baseFiles.get(f.displayPath)
-      let deltaCol: string
-      if (baseFile) {
-        const curPct = percentage(
-          f.metrics.coveredStatements,
-          f.metrics.statements,
+    rows.push(`| **${dir}** ${emptyCols}`)
+
+    for (const f of dirFiles) {
+      const name = fileName(f.displayPath)
+      const lines = fmt(
+        f.metrics.coveredStatements,
+        f.metrics.statements,
+        showAbsolute,
+      )
+      const methods = fmt(
+        f.metrics.coveredMethods,
+        f.metrics.methods,
+        showAbsolute,
+      )
+      const branches = fmt(
+        f.metrics.coveredConditionals,
+        f.metrics.conditionals,
+        showAbsolute,
+      )
+      const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '-'
+
+      if (hasDelta) {
+        const baseFile = baseFiles!.get(f.displayPath)
+        let deltaCol: string
+        if (baseFile) {
+          const curPct = percentage(
+            f.metrics.coveredStatements,
+            f.metrics.statements,
+          )
+          const basePct = percentage(
+            baseFile.metrics.coveredStatements,
+            baseFile.metrics.statements,
+          )
+          deltaCol = deltaStr(curPct, basePct)
+        } else {
+          deltaCol = ':sparkles: new'
+        }
+        rows.push(
+          `| \u00A0\u00A0\u00A0\u00A0${name} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`,
         )
-        const basePct = percentage(
-          baseFile.metrics.coveredStatements,
-          baseFile.metrics.statements,
-        )
-        deltaCol = deltaStr(curPct, basePct)
       } else {
-        deltaCol = ':sparkles: new'
+        rows.push(
+          `| \u00A0\u00A0\u00A0\u00A0${name} | ${lines} | ${methods} | ${branches} | ${crap} |`,
+        )
       }
-      rows.push(
-        `| ${f.displayPath} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`,
-      )
-    } else {
-      rows.push(
-        `| ${f.displayPath} | ${lines} | ${methods} | ${branches} | ${crap} |`,
-      )
     }
   }
 
