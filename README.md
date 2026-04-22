@@ -6,11 +6,13 @@ No external services, no tokens beyond the default `GITHUB_TOKEN`, no admin perm
 
 ## Features
 
+- **Automatic baseline management** downloads previous coverage from the target branch for comparison
 - **Summary table** with line, method, branch, and class coverage with progress bars
 - **File-level breakdown** grouped by directory in collapsible sections
 - **Baseline comparison** showing deltas against the target branch
 - **Smart auto-expand** for directories containing files touched in the PR
-- **CRAP index** (Change Risk Anti-Patterns) highlighting risky methods
+- **Changed file indicators** at both directory and file level
+- **CRAP index** (Change Risk Anti-Patterns) highlighting risky methods with tooltip
 - **Coverage distribution chart** showing file count per coverage range
 - **Clickable file names** linking directly to the source at the exact commit SHA
 - **Threshold enforcement** to fail the workflow on low or decreased coverage
@@ -21,16 +23,27 @@ No external services, no tokens beyond the default `GITHUB_TOKEN`, no admin perm
 
 ```yaml
 - name: Coverage Report
+  id: coverage
   uses: thiagomrvieira/saci-coverage-report@v1
   env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   with:
     file: coverage.xml
+    baseline-mode: true
+    workflow-file: tests.yml
+
+- if: github.event_name == 'push'
+  name: Upload baseline
+  uses: actions/upload-artifact@v4
+  with:
+    name: ${{ steps.coverage.outputs.baseline-artifact-name }}
+    path: coverage.xml
+    retention-days: 90
 ```
 
 ## Full Example
 
-A complete workflow that runs PHPUnit tests with Xdebug coverage, stores a baseline on each push to `staging`/`master`, and posts a comparison report on every PR:
+A complete workflow that runs PHPUnit with Xdebug coverage and automatic baseline comparison:
 
 ```yaml
 name: Tests
@@ -66,35 +79,16 @@ jobs:
       - name: Run tests
         run: php artisan test --coverage-clover=coverage.xml
 
-      # Store baseline on push to target branches
-      - if: github.event_name == 'push'
-        name: Upload baseline
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-baseline
-          path: coverage.xml
-          retention-days: 90
-
-      # Download baseline for comparison on PRs
-      - if: github.event_name == 'pull_request'
-        name: Download baseline
-        uses: dawidd6/action-download-artifact@v7
-        continue-on-error: true
-        with:
-          workflow: tests.yml
-          branch: ${{ github.base_ref }}
-          name: coverage-baseline
-          path: base-coverage
-
-      # Post coverage report
-      - if: github.event_name == 'pull_request'
-        name: Coverage Report
+      - name: Coverage Report
+        id: coverage
         uses: thiagomrvieira/saci-coverage-report@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           file: coverage.xml
-          base-file: base-coverage/coverage.xml
+          baseline-mode: true
+          workflow-file: tests.yml
+          baseline-retention-days: 90
           min-line-coverage: 0
           max-coverage-decrease: 5
           crap-threshold: 30
@@ -102,6 +96,35 @@ jobs:
           with-chart: true
           show-absolute-numbers: true
           signature: "My Project — Coverage Report"
+
+      - if: github.event_name == 'push'
+        name: Upload baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.coverage.outputs.baseline-artifact-name }}
+          path: coverage.xml
+          retention-days: 90
+```
+
+### How baseline-mode works
+
+1. On **push** to a target branch (e.g. `staging`), the action outputs the artifact name for upload. A subsequent `upload-artifact` step stores the coverage as a baseline.
+2. On **pull_request**, the action automatically searches for the baseline artifact from the target branch using the GitHub API. If found, it downloads and extracts it for delta comparison. No manual download step needed.
+
+This replaces the need for `dawidd6/action-download-artifact` or any other third-party download action.
+
+### Manual mode
+
+If you prefer full control, skip `baseline-mode` and provide `base-file` directly:
+
+```yaml
+- name: Coverage Report
+  uses: thiagomrvieira/saci-coverage-report@v1
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  with:
+    file: coverage.xml
+    base-file: path/to/base-coverage.xml
 ```
 
 ## Inputs
@@ -109,14 +132,18 @@ jobs:
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `file` | yes | — | Path to the Clover XML coverage file |
-| `base-file` | no | — | Path to the baseline Clover XML for delta comparison |
+| `base-file` | no | — | Path to the baseline Clover XML for delta comparison (manual mode) |
+| `baseline-mode` | no | `false` | Automatically manage baseline artifacts. Downloads baseline from the target branch on PRs. |
+| `baseline-artifact-name` | no | `saci-coverage-baseline` | Custom prefix for the baseline artifact. Branch name is appended automatically. |
+| `baseline-retention-days` | no | `90` | Number of days to retain baseline artifacts |
+| `workflow-file` | no | — | Workflow filename to find baseline runs (e.g. `tests.yml`). Required when `baseline-mode` is `true`. |
 | `min-line-coverage` | no | `0` | Minimum line coverage percentage to pass the check |
 | `max-coverage-decrease` | no | `100` | Maximum allowed coverage decrease in percentage points |
 | `crap-threshold` | no | `30` | CRAP index threshold for flagging risky methods |
 | `top-crap-limit` | no | `10` | Maximum number of methods to show in the risky methods table |
 | `with-chart` | no | `true` | Include the coverage distribution chart |
 | `show-absolute-numbers` | no | `true` | Show `45.2% (85/120)` instead of `45.2%` |
-| `only-changed-files` | no | `false` | Only show files whose coverage changed (requires `base-file`) |
+| `only-changed-files` | no | `false` | Only show files whose coverage changed (requires baseline) |
 | `signature` | no | `saci-coverage-report` | Custom text in the report footer |
 
 ## Outputs
@@ -127,21 +154,9 @@ jobs:
 | `method-coverage` | Method coverage percentage |
 | `branch-coverage` | Branch coverage percentage |
 | `coverage-decreased` | `true` if coverage decreased compared to baseline |
-
-Outputs can be used in subsequent steps:
-
-```yaml
-- name: Coverage Report
-  id: coverage
-  uses: thiagomrvieira/saci-coverage-report@v1
-  env:
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  with:
-    file: coverage.xml
-
-- name: Check result
-  run: echo "Line coverage is ${{ steps.coverage.outputs.line-coverage }}%"
-```
+| `baseline-artifact-name` | Artifact name to use with `upload-artifact` (only on push events with `baseline-mode`) |
+| `baseline-artifact-path` | Path to the coverage file for upload (only on push events with `baseline-mode`) |
+| `baseline-retention-days` | Retention days for the artifact (only on push events with `baseline-mode`) |
 
 ## Report Structure
 
@@ -162,14 +177,9 @@ High-level metrics with progress bars and, when a baseline exists, delta values.
 
 ### 2. File Breakdown
 
-Files are grouped by directory in collapsible `<details>` sections. Each group header shows:
+Files are grouped by directory in collapsible `<details>` sections. Each group header shows the directory path, aggregated coverage bar, file count, and how many files were changed in the PR.
 
-- Directory path
-- `changed` tag if the directory was touched in the PR
-- Aggregated coverage bar and percentage
-- File count
-
-Directories containing PR changes are **expanded by default**. All others are collapsed.
+Directories containing PR changes are expanded by default. All others are collapsed. Individual files touched in the PR are tagged with `changed` and sorted to the top.
 
 Each file name is a link to the source at the exact commit SHA.
 
@@ -189,21 +199,11 @@ A method with high complexity and low test coverage will have a high CRAP score,
 
 A collapsible ASCII histogram showing how files are distributed across coverage ranges (0-9%, 10-19%, ..., 100%).
 
-## How It Works
-
-1. Parses the Clover XML file generated by PHPUnit (or any Clover-compatible tool)
-2. If a `base-file` is provided, parses it and computes deltas
-3. Fetches the list of files changed in the PR via the GitHub API
-4. Generates a Markdown report with all sections
-5. Posts or updates a single PR comment (identified by a hidden marker)
-6. Writes the same report to `$GITHUB_STEP_SUMMARY`
-7. Sets output variables and enforces thresholds
-
 ## Requirements
 
 - The workflow must set `GITHUB_TOKEN` as an environment variable
 - The workflow needs `pull-requests: write` permission to post comments
-- The workflow needs `actions: read` permission if using `dawidd6/action-download-artifact` for baselines
+- The workflow needs `actions: read` permission for baseline artifact download
 - Coverage must be generated in Clover XML format (`--coverage-clover`)
 
 ### Coverage Drivers
@@ -215,7 +215,7 @@ The action works with any Clover XML output. For PHPUnit:
 | **Xdebug** | `coverage: xdebug` | yes | yes | slower |
 | **PCOV** | `coverage: pcov` | no | limited | faster |
 
-Xdebug is recommended for the richest reports (branch coverage, accurate CRAP values). PCOV is a good option when CI speed is a priority and branch-level detail is not needed.
+Xdebug is recommended for the richest reports. PCOV is a good option when CI speed is a priority.
 
 ## Permissions
 

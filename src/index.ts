@@ -4,12 +4,16 @@ import * as fs from 'fs'
 import {parseCloverXml} from './parser'
 import {formatReport} from './formatter'
 import {postComment} from './comment'
+import {downloadBaseline, artifactName} from './baseline'
 import {percentage} from './types'
 
 async function run(): Promise<void> {
   try {
     const file = core.getInput('file', {required: true})
-    const baseFile = core.getInput('base-file')
+    const baseFileInput = core.getInput('base-file')
+    const baselineMode = core.getInput('baseline-mode') === 'true'
+    const baselineRetentionDays = parseInt(core.getInput('baseline-retention-days') || '90', 10)
+    const workflowFile = core.getInput('workflow-file')
     const minLineCoverage = parseFloat(core.getInput('min-line-coverage') || '0')
     const maxCoverageDecrease = parseFloat(
       core.getInput('max-coverage-decrease') || '100',
@@ -26,6 +30,24 @@ async function run(): Promise<void> {
       throw new Error(`Coverage file not found: ${file}`)
     }
 
+    const eventName = github.context.eventName
+    const isPush = eventName === 'push'
+    const isPR = eventName === 'pull_request' || eventName === 'pull_request_target'
+
+    if (baselineMode && isPush) {
+      const branch = process.env.GITHUB_REF_NAME || 'unknown'
+      const name = artifactName(branch)
+      core.setOutput('baseline-artifact-name', name)
+      core.setOutput('baseline-artifact-path', file)
+      core.setOutput('baseline-retention-days', baselineRetentionDays.toString())
+      core.info(
+        `Push event detected with baseline-mode. ` +
+        `Use actions/upload-artifact to upload "${name}" with path "${file}" ` +
+        `(retention: ${baselineRetentionDays} days). ` +
+        `Or use the outputs of this step in a subsequent upload-artifact step.`,
+      )
+    }
+
     const workspacePrefix = process.env.GITHUB_WORKSPACE
       ? process.env.GITHUB_WORKSPACE + '/'
       : ''
@@ -33,9 +55,25 @@ async function run(): Promise<void> {
     core.info(`Parsing coverage file: ${file}`)
     const current = await parseCloverXml(file, workspacePrefix)
 
+    let baseFile = baseFileInput
+    if (baselineMode && isPR && !baseFile) {
+      const baseBranch = github.context.payload.pull_request?.base?.ref
+      if (baseBranch && workflowFile) {
+        core.info(`Baseline mode: downloading baseline from branch "${baseBranch}"...`)
+        const downloaded = await downloadBaseline(baseBranch, workflowFile)
+        if (downloaded) {
+          baseFile = downloaded
+        }
+      } else if (!baseBranch) {
+        core.info('Could not determine base branch for baseline download.')
+      } else if (!workflowFile) {
+        core.warning('baseline-mode requires workflow-file input to find baseline runs.')
+      }
+    }
+
     let baseReport = null
     if (baseFile && fs.existsSync(baseFile)) {
-      core.info(`Parsing base coverage file: ${baseFile}`)
+      core.info(`Parsing base coverage: ${baseFile}`)
       baseReport = await parseCloverXml(baseFile, workspacePrefix)
     } else if (baseFile) {
       core.info(`Base file not found: ${baseFile}, skipping comparison.`)
@@ -80,7 +118,15 @@ async function run(): Promise<void> {
       repoUrl,
     })
 
-    await postComment(markdown, signature)
+    if (isPR) {
+      await postComment(markdown, signature)
+    } else {
+      const summaryFile = process.env.GITHUB_STEP_SUMMARY
+      if (summaryFile) {
+        fs.appendFileSync(summaryFile, markdown + '\n')
+        core.info('Coverage report written to step summary.')
+      }
+    }
 
     const lineCoverage = percentage(
       current.projectMetrics.coveredStatements,

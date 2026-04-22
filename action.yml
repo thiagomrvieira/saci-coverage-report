@@ -11,8 +11,24 @@ inputs:
     description: 'Path to the clover.xml coverage file'
     required: true
   base-file:
-    description: 'Path to the base clover.xml for diff comparison'
+    description: 'Path to the base clover.xml for diff comparison (manual mode)'
     required: false
+  baseline-mode:
+    description: 'Automatically manage baseline artifacts. On push events uploads the coverage as a baseline artifact; on pull_request events downloads the baseline from the target branch for comparison. Replaces the need for manual upload/download artifact steps.'
+    required: false
+    default: 'false'
+  baseline-artifact-name:
+    description: 'Custom prefix for the baseline artifact name. The branch name is appended automatically.'
+    required: false
+    default: 'saci-coverage-baseline'
+  baseline-retention-days:
+    description: 'Number of days to retain baseline artifacts'
+    required: false
+    default: '90'
+  workflow-file:
+    description: 'Workflow filename used to find baseline runs (e.g. tests.yml). Required when baseline-mode is true.'
+    required: false
+    default: ''
   min-line-coverage:
     description: 'Minimum line coverage percentage to pass'
     required: false
@@ -38,7 +54,7 @@ inputs:
     required: false
     default: 'true'
   only-changed-files:
-    description: 'Only show files with coverage changes in the table (requires base-file)'
+    description: 'Only show files with coverage changes in the table (requires base-file or baseline-mode)'
     required: false
     default: 'false'
   signature:

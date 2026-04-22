@@ -1,6 +1,151 @@
 require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
+/***/ 5497:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.artifactName = artifactName;
+exports.downloadBaseline = downloadBaseline;
+const core = __importStar(__nccwpck_require__(7484));
+const github = __importStar(__nccwpck_require__(3228));
+const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
+const child_process_1 = __nccwpck_require__(5317);
+const ARTIFACT_PREFIX = 'saci-coverage-baseline';
+function artifactName(branch) {
+    const safe = branch.replace(/[^a-zA-Z0-9._-]/g, '-');
+    return `${ARTIFACT_PREFIX}-${safe}`;
+}
+function getOctokit() {
+    const token = process.env.GITHUB_TOKEN || core.getInput('github-token');
+    if (!token)
+        throw new Error('GITHUB_TOKEN is required for baseline-mode');
+    return github.getOctokit(token);
+}
+async function downloadBaseline(branch, workflowFile) {
+    const octokit = getOctokit();
+    const { owner, repo } = github.context.repo;
+    const name = artifactName(branch);
+    core.info(`Searching for artifact "${name}" from branch "${branch}"...`);
+    let runs;
+    try {
+        const resp = await octokit.rest.actions.listWorkflowRuns({
+            owner,
+            repo,
+            workflow_id: workflowFile,
+            branch,
+            status: 'success',
+            per_page: 10,
+        });
+        runs = resp.data.workflow_runs;
+    }
+    catch {
+        core.info('Could not list workflow runs. Skipping baseline comparison.');
+        return null;
+    }
+    if (runs.length === 0) {
+        core.info(`No successful runs found on branch "${branch}".`);
+        return null;
+    }
+    for (const run of runs) {
+        let artifacts;
+        try {
+            const resp = await octokit.rest.actions.listWorkflowRunArtifacts({
+                owner,
+                repo,
+                run_id: run.id,
+                per_page: 50,
+            });
+            artifacts = resp.data.artifacts;
+        }
+        catch {
+            continue;
+        }
+        const match = artifacts.find((a) => a.name === name && !a.expired);
+        if (!match)
+            continue;
+        core.info(`Found baseline in run #${run.run_number} (${run.created_at})`);
+        let zip;
+        try {
+            const resp = await octokit.rest.actions.downloadArtifact({
+                owner,
+                repo,
+                artifact_id: match.id,
+                archive_format: 'zip',
+            });
+            zip = resp.data;
+        }
+        catch {
+            core.info(`Failed to download artifact from run ${run.id}, trying next...`);
+            continue;
+        }
+        const tmpDir = path.join(process.env.RUNNER_TEMP || '/tmp', 'saci-baseline');
+        fs.mkdirSync(tmpDir, { recursive: true });
+        const zipPath = path.join(tmpDir, 'baseline.zip');
+        fs.writeFileSync(zipPath, Buffer.from(zip));
+        try {
+            (0, child_process_1.execSync)(`unzip -o "${zipPath}" -d "${tmpDir}"`, { stdio: 'pipe' });
+        }
+        catch {
+            core.warning('Failed to unzip baseline artifact.');
+            continue;
+        }
+        const xmlPath = path.join(tmpDir, 'coverage.xml');
+        if (fs.existsSync(xmlPath)) {
+            core.info('Baseline extracted successfully.');
+            return xmlPath;
+        }
+        const xmlFiles = fs.readdirSync(tmpDir).filter((f) => f.endsWith('.xml'));
+        if (xmlFiles.length > 0) {
+            const found = path.join(tmpDir, xmlFiles[0]);
+            core.info(`Baseline extracted: ${xmlFiles[0]}`);
+            return found;
+        }
+        core.warning(`No XML file found in artifact from run ${run.id}.`);
+    }
+    core.info('No usable baseline found in recent runs.');
+    return null;
+}
+//# sourceMappingURL=baseline.js.map
+
+/***/ }),
+
 /***/ 9661:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -451,11 +596,15 @@ const fs = __importStar(__nccwpck_require__(9896));
 const parser_1 = __nccwpck_require__(2177);
 const formatter_1 = __nccwpck_require__(3706);
 const comment_1 = __nccwpck_require__(9661);
+const baseline_1 = __nccwpck_require__(5497);
 const types_1 = __nccwpck_require__(2433);
 async function run() {
     try {
         const file = core.getInput('file', { required: true });
-        const baseFile = core.getInput('base-file');
+        const baseFileInput = core.getInput('base-file');
+        const baselineMode = core.getInput('baseline-mode') === 'true';
+        const baselineRetentionDays = parseInt(core.getInput('baseline-retention-days') || '90', 10);
+        const workflowFile = core.getInput('workflow-file');
         const minLineCoverage = parseFloat(core.getInput('min-line-coverage') || '0');
         const maxCoverageDecrease = parseFloat(core.getInput('max-coverage-decrease') || '100');
         const crapThreshold = parseFloat(core.getInput('crap-threshold') || '30');
@@ -467,14 +616,45 @@ async function run() {
         if (!fs.existsSync(file)) {
             throw new Error(`Coverage file not found: ${file}`);
         }
+        const eventName = github.context.eventName;
+        const isPush = eventName === 'push';
+        const isPR = eventName === 'pull_request' || eventName === 'pull_request_target';
+        if (baselineMode && isPush) {
+            const branch = process.env.GITHUB_REF_NAME || 'unknown';
+            const name = (0, baseline_1.artifactName)(branch);
+            core.setOutput('baseline-artifact-name', name);
+            core.setOutput('baseline-artifact-path', file);
+            core.setOutput('baseline-retention-days', baselineRetentionDays.toString());
+            core.info(`Push event detected with baseline-mode. ` +
+                `Use actions/upload-artifact to upload "${name}" with path "${file}" ` +
+                `(retention: ${baselineRetentionDays} days). ` +
+                `Or use the outputs of this step in a subsequent upload-artifact step.`);
+        }
         const workspacePrefix = process.env.GITHUB_WORKSPACE
             ? process.env.GITHUB_WORKSPACE + '/'
             : '';
         core.info(`Parsing coverage file: ${file}`);
         const current = await (0, parser_1.parseCloverXml)(file, workspacePrefix);
+        let baseFile = baseFileInput;
+        if (baselineMode && isPR && !baseFile) {
+            const baseBranch = github.context.payload.pull_request?.base?.ref;
+            if (baseBranch && workflowFile) {
+                core.info(`Baseline mode: downloading baseline from branch "${baseBranch}"...`);
+                const downloaded = await (0, baseline_1.downloadBaseline)(baseBranch, workflowFile);
+                if (downloaded) {
+                    baseFile = downloaded;
+                }
+            }
+            else if (!baseBranch) {
+                core.info('Could not determine base branch for baseline download.');
+            }
+            else if (!workflowFile) {
+                core.warning('baseline-mode requires workflow-file input to find baseline runs.');
+            }
+        }
         let baseReport = null;
         if (baseFile && fs.existsSync(baseFile)) {
-            core.info(`Parsing base coverage file: ${baseFile}`);
+            core.info(`Parsing base coverage: ${baseFile}`);
             baseReport = await (0, parser_1.parseCloverXml)(baseFile, workspacePrefix);
         }
         else if (baseFile) {
@@ -515,7 +695,16 @@ async function run() {
             changedFiles,
             repoUrl,
         });
-        await (0, comment_1.postComment)(markdown, signature);
+        if (isPR) {
+            await (0, comment_1.postComment)(markdown, signature);
+        }
+        else {
+            const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+            if (summaryFile) {
+                fs.appendFileSync(summaryFile, markdown + '\n');
+                core.info('Coverage report written to step summary.');
+            }
+        }
         const lineCoverage = (0, types_1.percentage)(current.projectMetrics.coveredStatements, current.projectMetrics.statements);
         const methodCoverage = (0, types_1.percentage)(current.projectMetrics.coveredMethods, current.projectMetrics.methods);
         const branchCoverage = (0, types_1.percentage)(current.projectMetrics.coveredConditionals, current.projectMetrics.conditionals);
