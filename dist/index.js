@@ -192,7 +192,15 @@ function isDirAffected(dir, changedFiles) {
         return true;
     return changedFiles.some((f) => f.startsWith(dir + '/') || f === dir);
 }
-function dirSummary(dir, dirFiles, showAbsolute, affected) {
+function countChangedInDir(dir, dirFiles, changedFiles) {
+    if (changedFiles.length === 0)
+        return 0;
+    return dirFiles.filter((f) => changedFiles.some((cf) => cf === f.displayPath)).length;
+}
+function isFileChanged(displayPath, changedFiles) {
+    return changedFiles.some((cf) => cf === displayPath);
+}
+function dirSummary(dir, dirFiles, showAbsolute, affected, changedCount) {
     let totalStmts = 0;
     let coveredStmts = 0;
     for (const f of dirFiles) {
@@ -203,7 +211,10 @@ function dirSummary(dir, dirFiles, showAbsolute, affected) {
     const coverage = showAbsolute && totalStmts > 0
         ? `${pct}% (${coveredStmts}/${totalStmts})`
         : `${pct}%`;
-    const tag = affected ? ' <code>changed</code>' : '';
+    let tag = '';
+    if (affected && changedCount > 0) {
+        tag = ` <code>${changedCount} of ${dirFiles.length} changed</code>`;
+    }
     return `<b>${dir}</b>${tag} \u2014 <code>${bar(pct)}</code> ${coverage} \u00B7 ${dirFiles.length} files`;
 }
 function fileLink(displayPath, repoUrl) {
@@ -212,8 +223,12 @@ function fileLink(displayPath, repoUrl) {
         return `\`${name}\``;
     return `[\`${name}\`](${repoUrl}/${displayPath} "${displayPath}")`;
 }
-function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl) {
+function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles) {
     dirFiles.sort((a, b) => {
+        const aChanged = isFileChanged(a.displayPath, changedFiles) ? 0 : 1;
+        const bChanged = isFileChanged(b.displayPath, changedFiles) ? 0 : 1;
+        if (aChanged !== bChanged)
+            return aChanged - bChanged;
         const aPct = (0, types_1.percentage)(a.metrics.coveredStatements, a.metrics.statements);
         const bPct = (0, types_1.percentage)(b.metrics.coveredStatements, b.metrics.statements);
         return aPct - bPct;
@@ -229,6 +244,8 @@ function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl) {
     }
     for (const f of dirFiles) {
         const link = fileLink(f.displayPath, repoUrl);
+        const changed = isFileChanged(f.displayPath, changedFiles);
+        const tag = changed ? ' `changed`' : '';
         const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute);
         const methods = fmt(f.metrics.coveredMethods, f.metrics.methods, showAbsolute);
         const branches = fmt(f.metrics.coveredConditionals, f.metrics.conditionals, showAbsolute);
@@ -244,10 +261,10 @@ function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl) {
             else {
                 deltaCol = '`new`';
             }
-            rows.push(`| ${link} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`);
+            rows.push(`| ${link}${tag} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`);
         }
         else {
-            rows.push(`| ${link} | ${lines} | ${methods} | ${branches} | ${crap} |`);
+            rows.push(`| ${link}${tag} | ${lines} | ${methods} | ${branches} | ${crap} |`);
         }
     }
     return rows.join('\n');
@@ -274,9 +291,10 @@ function fileTable(files, baseFiles, showAbsolute, onlyChanged, changedFiles, re
     for (const dir of sortedDirs) {
         const dirFiles = groups.get(dir);
         const affected = isDirAffected(dir, changedFiles);
+        const changedCount = countChangedInDir(dir, dirFiles, changedFiles);
         const openAttr = affected ? ' open' : '';
-        const summary = dirSummary(dir, dirFiles, showAbsolute, affected);
-        const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl);
+        const summary = dirSummary(dir, dirFiles, showAbsolute, affected, changedCount);
+        const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles);
         sections.push(`<details${openAttr}>\n<summary>${summary}</summary>\n\n${table}\n\n</details>`);
     }
     return sections.join('\n\n');
