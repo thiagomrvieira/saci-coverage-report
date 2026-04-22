@@ -1,0 +1,30 @@
+{
+  "name": "saci-coverage-report",
+  "version": "1.0.0",
+  "description": "GitHub Action that posts rich PHP/Clover coverage reports as PR comments (CRAP index, branches, absolute numbers)",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && ncc build lib/index.js -o dist --source-map --license licenses.txt",
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "keywords": [
+    "github-action",
+    "coverage",
+    "clover",
+    "phpunit",
+    "crap"
+  ],
+  "author": "thiagomrvieira",
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.0",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/xml2js": "^0.4.14",
+    "@vercel/ncc": "^0.38.4",
+    "typescript": "^6.0.3"
+  }
+}

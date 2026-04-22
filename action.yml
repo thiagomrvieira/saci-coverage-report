@@ -1,0 +1,61 @@
+name: 'Saci Coverage Report'
+description: 'Posts rich PHP/Clover coverage reports as PR comments with CRAP index, branches, absolute numbers, and distribution charts.'
+author: 'thiagomrvieira'
+
+branding:
+  icon: 'bar-chart-2'
+  color: 'green'
+
+inputs:
+  file:
+    description: 'Path to the clover.xml coverage file'
+    required: true
+  base-file:
+    description: 'Path to the base clover.xml for diff comparison'
+    required: false
+  min-line-coverage:
+    description: 'Minimum line coverage percentage to pass'
+    required: false
+    default: '0'
+  max-coverage-decrease:
+    description: 'Maximum allowed line coverage decrease (percentage points)'
+    required: false
+    default: '100'
+  crap-threshold:
+    description: 'CRAP index threshold for highlighting risky methods'
+    required: false
+    default: '30'
+  top-crap-limit:
+    description: 'Maximum number of methods to show in the Top CRAP table'
+    required: false
+    default: '10'
+  with-chart:
+    description: 'Include ASCII distribution chart'
+    required: false
+    default: 'true'
+  show-absolute-numbers:
+    description: 'Show absolute numbers alongside percentages (e.g. 45.2% (85/120))'
+    required: false
+    default: 'true'
+  only-changed-files:
+    description: 'Only show files with coverage changes in the table (requires base-file)'
+    required: false
+    default: 'false'
+  signature:
+    description: 'Custom signature at the bottom of the comment'
+    required: false
+    default: 'saci-coverage-report'
+
+outputs:
+  line-coverage:
+    description: 'Line coverage percentage'
+  method-coverage:
+    description: 'Method coverage percentage'
+  branch-coverage:
+    description: 'Branch coverage percentage'
+  coverage-decreased:
+    description: 'Whether coverage decreased compared to base'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
