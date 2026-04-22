@@ -20,25 +20,19 @@ interface FormatterOptions {
   repoUrl: string
 }
 
-const PROGRESS_WIDTH = 10
-const BLOCK_FULL = '\u2588'
-const BLOCK_LIGHT = '\u2591'
+const BAR_WIDTH = 8
+const CHAR_FILLED = '\u2588'
+const CHAR_EMPTY = '\u2591'
 
-function healthIcon(pct: number): string {
-  if (pct >= 80) return '\u{1F7E2}'
-  if (pct >= 50) return '\u{1F7E1}'
-  return '\u{1F534}'
+function bar(pct: number): string {
+  const filled = Math.round((pct / 100) * BAR_WIDTH)
+  return CHAR_FILLED.repeat(filled) + CHAR_EMPTY.repeat(BAR_WIDTH - filled)
 }
 
-function progressBar(pct: number): string {
-  const filled = Math.round((pct / 100) * PROGRESS_WIDTH)
-  return BLOCK_FULL.repeat(filled) + BLOCK_LIGHT.repeat(PROGRESS_WIDTH - filled)
-}
-
-function statusBadge(pct: number): string {
-  if (pct >= 80) return ':white_check_mark: **Healthy**'
-  if (pct >= 50) return ':large_orange_diamond: **Moderate**'
-  return ':rotating_light: **Low**'
+function coverageLabel(pct: number): string {
+  if (pct >= 80) return 'high'
+  if (pct >= 50) return 'mid'
+  return 'low'
 }
 
 function fmt(covered: number, total: number, showAbsolute: boolean): string {
@@ -51,12 +45,10 @@ function fmt(covered: number, total: number, showAbsolute: boolean): string {
 
 function deltaStr(currentPct: number, basePct: number): string {
   const d = delta(currentPct, basePct)
-  if (d >= 5) return `:chart_with_upwards_trend: +${d}%`
-  if (d > 0) return `:small_blue_diamond: +${d}%`
-  if (d === 0) return `:heavy_minus_sign: 0%`
-  if (d > -1) return `:small_orange_diamond: ${d}%`
-  if (d > -5) return `:warning: ${d}%`
-  return `:red_circle: ${d}%`
+  if (d > 0) return `**+${d}%**`
+  if (d === 0) return `\u2014`
+  if (d > -5) return `${d}%`
+  return `**${d}%**`
 }
 
 function summaryTable(
@@ -73,17 +65,13 @@ function summaryTable(
   }[] = [
     {label: 'Lines', covered: 'coveredStatements', total: 'statements'},
     {label: 'Methods', covered: 'coveredMethods', total: 'methods'},
-    {
-      label: 'Branches',
-      covered: 'coveredConditionals',
-      total: 'conditionals',
-    },
+    {label: 'Branches', covered: 'coveredConditionals', total: 'conditionals'},
     {label: 'Classes', covered: 'coveredClasses', total: 'classes'},
   ]
 
   if (base) {
-    rows.push('| | Metric | Current | Base | Delta |')
-    rows.push('|---|--------|---------|------|-------|')
+    rows.push('| Metric | Coverage | | Base | Delta |')
+    rows.push('|--------|-------:|---|-----:|------:|')
     for (const m of metrics) {
       const curVal = current[m.covered] as number
       const curTotal = current[m.total] as number
@@ -91,21 +79,19 @@ function summaryTable(
       const baseTotal = base[m.total] as number
       const curPct = percentage(curVal, curTotal)
       const basePct = percentage(baseVal, baseTotal)
-      const icon = healthIcon(curPct)
       rows.push(
-        `| ${icon} | **${m.label}** | \`${progressBar(curPct)}\` ${fmt(curVal, curTotal, showAbsolute)} | ${fmt(baseVal, baseTotal, showAbsolute)} | ${deltaStr(curPct, basePct)} |`,
+        `| **${m.label}** | ${fmt(curVal, curTotal, showAbsolute)} | \`${bar(curPct)}\` | ${fmt(baseVal, baseTotal, showAbsolute)} | ${deltaStr(curPct, basePct)} |`,
       )
     }
   } else {
-    rows.push('| | Metric | Coverage |')
-    rows.push('|---|--------|----------|')
+    rows.push('| Metric | Coverage | |')
+    rows.push('|--------|-------:|---|')
     for (const m of metrics) {
       const curVal = current[m.covered] as number
       const curTotal = current[m.total] as number
       const curPct = percentage(curVal, curTotal)
-      const icon = healthIcon(curPct)
       rows.push(
-        `| ${icon} | **${m.label}** | \`${progressBar(curPct)}\` ${fmt(curVal, curTotal, showAbsolute)} |`,
+        `| **${m.label}** | ${fmt(curVal, curTotal, showAbsolute)} | \`${bar(curPct)}\` |`,
       )
     }
   }
@@ -117,14 +103,12 @@ function groupByDirectory(
   files: FileMetrics[],
 ): Map<string, FileMetrics[]> {
   const groups = new Map<string, FileMetrics[]>()
-
   for (const f of files) {
     const lastSlash = f.displayPath.lastIndexOf('/')
     const dir = lastSlash >= 0 ? f.displayPath.substring(0, lastSlash) : '.'
     if (!groups.has(dir)) groups.set(dir, [])
     groups.get(dir)!.push(f)
   }
-
   return groups
 }
 
@@ -138,7 +122,8 @@ function isDirAffected(dir: string, changedFiles: string[]): boolean {
   return changedFiles.some((f) => f.startsWith(dir + '/') || f === dir)
 }
 
-function dirSummaryLine(
+function dirSummary(
+  dir: string,
   dirFiles: FileMetrics[],
   showAbsolute: boolean,
   affected: boolean,
@@ -150,19 +135,17 @@ function dirSummaryLine(
     coveredStmts += f.metrics.coveredStatements
   }
   const pct = percentage(coveredStmts, totalStmts)
-  const icon = healthIcon(pct)
-  const bar = progressBar(pct)
   const coverage = showAbsolute && totalStmts > 0
     ? `${pct}% (${coveredStmts}/${totalStmts})`
     : `${pct}%`
-  const touchedBadge = affected ? ' \u{1F525}' : ''
-  return `${icon} <b>${dirFiles[0].displayPath.substring(0, dirFiles[0].displayPath.lastIndexOf('/'))}</b>${touchedBadge} \u2014 <code>${bar}</code> ${coverage} (${dirFiles.length} files)`
+  const tag = affected ? ' <code>changed</code>' : ''
+  return `<b>${dir}</b>${tag} \u2014 <code>${bar(pct)}</code> ${coverage} \u00B7 ${dirFiles.length} files`
 }
 
 function fileLink(displayPath: string, repoUrl: string): string {
   const name = fileName(displayPath)
-  if (!repoUrl) return name
-  return `[${name}](${repoUrl}/${displayPath} "${displayPath}")`
+  if (!repoUrl) return `\`${name}\``
+  return `[\`${name}\`](${repoUrl}/${displayPath} "${displayPath}")`
 }
 
 function buildDirTable(
@@ -182,20 +165,18 @@ function buildDirTable(
 
   if (hasDelta) {
     rows.push('| File | Lines | Methods | Branches | CRAP | Delta |')
-    rows.push('|------|------:|--------:|---------:|-----:|-------|')
+    rows.push('|------|------:|--------:|---------:|-----:|------:|')
   } else {
     rows.push('| File | Lines | Methods | Branches | CRAP |')
     rows.push('|------|------:|--------:|---------:|-----:|')
   }
 
   for (const f of dirFiles) {
-    const name = fileLink(f.displayPath, repoUrl)
-    const linePct = percentage(f.metrics.coveredStatements, f.metrics.statements)
-    const icon = healthIcon(linePct)
+    const link = fileLink(f.displayPath, repoUrl)
     const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute)
     const methods = fmt(f.metrics.coveredMethods, f.metrics.methods, showAbsolute)
     const branches = fmt(f.metrics.coveredConditionals, f.metrics.conditionals, showAbsolute)
-    const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '-'
+    const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '\u2014'
 
     if (hasDelta) {
       const baseFile = baseFiles!.get(f.displayPath)
@@ -205,11 +186,11 @@ function buildDirTable(
         const basePct = percentage(baseFile.metrics.coveredStatements, baseFile.metrics.statements)
         deltaCol = deltaStr(curPct, basePct)
       } else {
-        deltaCol = ':sparkles: new'
+        deltaCol = '`new`'
       }
-      rows.push(`| ${icon} ${name} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`)
+      rows.push(`| ${link} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`)
     } else {
-      rows.push(`| ${icon} ${name} | ${lines} | ${methods} | ${branches} | ${crap} |`)
+      rows.push(`| ${link} | ${lines} | ${methods} | ${branches} | ${crap} |`)
     }
   }
 
@@ -252,8 +233,7 @@ function fileTable(
     const dirFiles = groups.get(dir)!
     const affected = isDirAffected(dir, changedFiles)
     const openAttr = affected ? ' open' : ''
-    const summary = dirSummaryLine(dirFiles, showAbsolute, affected)
-
+    const summary = dirSummary(dir, dirFiles, showAbsolute, affected)
     const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl)
 
     sections.push(
@@ -281,20 +261,19 @@ function topCrapTable(
     '',
     '---',
     '',
-    `#### :rotating_light: Top CRAP Methods (threshold \u2265 ${threshold})`,
+    `#### Risky Methods \u2014 CRAP \u2265 ${threshold}`,
     '',
     '| Method | File | CRAP | Coverage | Complexity |',
     '|--------|------|-----:|---------:|-----------:|',
   ]
 
   for (const m of risky) {
-    const coverage = percentage(m.coveredLines, m.lineCount)
-    const icon = healthIcon(coverage)
+    const cov = percentage(m.coveredLines, m.lineCount)
     const fileRef = repoUrl
-      ? `[${fileName(m.file)}](${repoUrl}/${m.file} "${m.file}")`
-      : fileName(m.file)
+      ? `[\`${fileName(m.file)}\`](${repoUrl}/${m.file} "${m.file}")`
+      : `\`${fileName(m.file)}\``
     rows.push(
-      `| ${icon} \`${m.className}::${m.name}\` | ${fileRef} | **${m.crap}** | ${coverage}% | ${m.complexity} |`,
+      `| \`${m.className}::${m.name}\` | ${fileRef} | **${m.crap}** | ${cov}% | ${m.complexity} |`,
     )
   }
 
@@ -322,37 +301,28 @@ function distributionChart(files: FileMetrics[]): string {
     '',
     '---',
     '',
-    '#### Coverage Distribution',
+    '<details>',
+    '<summary><b>Coverage Distribution</b></summary>',
     '',
     '```',
   ]
-  rows.push(
-    'Cover ' +
-      '\u250c' +
-      '\u2500'.repeat(barWidth + 2) +
-      '\u2510' +
-      ' Freq.',
-  )
 
   for (let i = 0; i <= 10; i++) {
-    const label = `${(i * 10).toString().padStart(3)}%`
-    const freq = totalFiles > 0 ? (buckets[i] / totalFiles) * 100 : 0
+    const lo = i * 10
+    const hi = i === 10 ? 100 : lo + 9
+    const label = `${lo.toString().padStart(3)}-${hi.toString().padStart(3)}%`
     const filled = maxFreq > 0 ? Math.round((buckets[i] / maxFreq) * barWidth) : 0
-    const bar =
-      BLOCK_FULL.repeat(filled) + BLOCK_LIGHT.repeat(barWidth - filled)
+    const b = CHAR_FILLED.repeat(filled) + ' '.repeat(barWidth - filled)
     rows.push(
-      `${label} \u2502 ${bar} \u2502 ${buckets[i].toString().padStart(3)} (${freq.toFixed(1)}%)`,
+      `  ${label}  ${b}  ${buckets[i]}`,
     )
   }
 
-  rows.push(
-    '     ' +
-      ' \u2514' +
-      '\u2500'.repeat(barWidth + 2) +
-      '\u2518',
-  )
-  rows.push(`       ${totalFiles} files analyzed`)
   rows.push('```')
+  rows.push('')
+  rows.push(`${totalFiles} files analyzed`)
+  rows.push('')
+  rows.push('</details>')
 
   return rows.join('\n')
 }
@@ -371,9 +341,8 @@ export function formatReport(
     current.projectMetrics.coveredStatements,
     current.projectMetrics.statements,
   )
-  const badge = statusBadge(overallPct)
 
-  parts.push(`### ${badge} Coverage Report for \`${shortSha}\``)
+  parts.push(`## Coverage Report \u2014 \`${shortSha}\` \u2014 ${overallPct}% ${coverageLabel(overallPct)}`)
   parts.push('')
 
   parts.push(
@@ -387,7 +356,7 @@ export function formatReport(
   parts.push('')
   parts.push('---')
   parts.push('')
-  parts.push('#### :open_file_folder: Files')
+  parts.push('#### Files')
   parts.push('')
 
   const baseFileMap = options.baseReport
@@ -432,7 +401,7 @@ export function formatReport(
   parts.push('')
   parts.push('---')
   parts.push(
-    `<sub>${options.signature} \u2022 ${totalFiles} files across ${totalDirs} directories \u2022 ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC</sub>`,
+    `<sub>${options.signature} \u2022 ${totalFiles} files \u2022 ${totalDirs} directories \u2022 ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC</sub>`,
   )
 
   return parts.join('\n')

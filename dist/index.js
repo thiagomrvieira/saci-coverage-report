@@ -108,26 +108,19 @@ function writeSummary(body) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.formatReport = formatReport;
 const types_1 = __nccwpck_require__(2433);
-const PROGRESS_WIDTH = 10;
-const BLOCK_FULL = '\u2588';
-const BLOCK_LIGHT = '\u2591';
-function healthIcon(pct) {
-    if (pct >= 80)
-        return '\u{1F7E2}';
-    if (pct >= 50)
-        return '\u{1F7E1}';
-    return '\u{1F534}';
+const BAR_WIDTH = 8;
+const CHAR_FILLED = '\u2588';
+const CHAR_EMPTY = '\u2591';
+function bar(pct) {
+    const filled = Math.round((pct / 100) * BAR_WIDTH);
+    return CHAR_FILLED.repeat(filled) + CHAR_EMPTY.repeat(BAR_WIDTH - filled);
 }
-function progressBar(pct) {
-    const filled = Math.round((pct / 100) * PROGRESS_WIDTH);
-    return BLOCK_FULL.repeat(filled) + BLOCK_LIGHT.repeat(PROGRESS_WIDTH - filled);
-}
-function statusBadge(pct) {
+function coverageLabel(pct) {
     if (pct >= 80)
-        return ':white_check_mark: **Healthy**';
+        return 'high';
     if (pct >= 50)
-        return ':large_orange_diamond: **Moderate**';
-    return ':rotating_light: **Low**';
+        return 'mid';
+    return 'low';
 }
 function fmt(covered, total, showAbsolute) {
     const pct = (0, types_1.percentage)(covered, total);
@@ -138,33 +131,25 @@ function fmt(covered, total, showAbsolute) {
 }
 function deltaStr(currentPct, basePct) {
     const d = (0, types_1.delta)(currentPct, basePct);
-    if (d >= 5)
-        return `:chart_with_upwards_trend: +${d}%`;
     if (d > 0)
-        return `:small_blue_diamond: +${d}%`;
+        return `**+${d}%**`;
     if (d === 0)
-        return `:heavy_minus_sign: 0%`;
-    if (d > -1)
-        return `:small_orange_diamond: ${d}%`;
+        return `\u2014`;
     if (d > -5)
-        return `:warning: ${d}%`;
-    return `:red_circle: ${d}%`;
+        return `${d}%`;
+    return `**${d}%**`;
 }
 function summaryTable(current, base, showAbsolute) {
     const rows = [];
     const metrics = [
         { label: 'Lines', covered: 'coveredStatements', total: 'statements' },
         { label: 'Methods', covered: 'coveredMethods', total: 'methods' },
-        {
-            label: 'Branches',
-            covered: 'coveredConditionals',
-            total: 'conditionals',
-        },
+        { label: 'Branches', covered: 'coveredConditionals', total: 'conditionals' },
         { label: 'Classes', covered: 'coveredClasses', total: 'classes' },
     ];
     if (base) {
-        rows.push('| | Metric | Current | Base | Delta |');
-        rows.push('|---|--------|---------|------|-------|');
+        rows.push('| Metric | Coverage | | Base | Delta |');
+        rows.push('|--------|-------:|---|-----:|------:|');
         for (const m of metrics) {
             const curVal = current[m.covered];
             const curTotal = current[m.total];
@@ -172,19 +157,17 @@ function summaryTable(current, base, showAbsolute) {
             const baseTotal = base[m.total];
             const curPct = (0, types_1.percentage)(curVal, curTotal);
             const basePct = (0, types_1.percentage)(baseVal, baseTotal);
-            const icon = healthIcon(curPct);
-            rows.push(`| ${icon} | **${m.label}** | \`${progressBar(curPct)}\` ${fmt(curVal, curTotal, showAbsolute)} | ${fmt(baseVal, baseTotal, showAbsolute)} | ${deltaStr(curPct, basePct)} |`);
+            rows.push(`| **${m.label}** | ${fmt(curVal, curTotal, showAbsolute)} | \`${bar(curPct)}\` | ${fmt(baseVal, baseTotal, showAbsolute)} | ${deltaStr(curPct, basePct)} |`);
         }
     }
     else {
-        rows.push('| | Metric | Coverage |');
-        rows.push('|---|--------|----------|');
+        rows.push('| Metric | Coverage | |');
+        rows.push('|--------|-------:|---|');
         for (const m of metrics) {
             const curVal = current[m.covered];
             const curTotal = current[m.total];
             const curPct = (0, types_1.percentage)(curVal, curTotal);
-            const icon = healthIcon(curPct);
-            rows.push(`| ${icon} | **${m.label}** | \`${progressBar(curPct)}\` ${fmt(curVal, curTotal, showAbsolute)} |`);
+            rows.push(`| **${m.label}** | ${fmt(curVal, curTotal, showAbsolute)} | \`${bar(curPct)}\` |`);
         }
     }
     return rows.join('\n');
@@ -209,7 +192,7 @@ function isDirAffected(dir, changedFiles) {
         return true;
     return changedFiles.some((f) => f.startsWith(dir + '/') || f === dir);
 }
-function dirSummaryLine(dirFiles, showAbsolute, affected) {
+function dirSummary(dir, dirFiles, showAbsolute, affected) {
     let totalStmts = 0;
     let coveredStmts = 0;
     for (const f of dirFiles) {
@@ -217,19 +200,17 @@ function dirSummaryLine(dirFiles, showAbsolute, affected) {
         coveredStmts += f.metrics.coveredStatements;
     }
     const pct = (0, types_1.percentage)(coveredStmts, totalStmts);
-    const icon = healthIcon(pct);
-    const bar = progressBar(pct);
     const coverage = showAbsolute && totalStmts > 0
         ? `${pct}% (${coveredStmts}/${totalStmts})`
         : `${pct}%`;
-    const touchedBadge = affected ? ' \u{1F525}' : '';
-    return `${icon} <b>${dirFiles[0].displayPath.substring(0, dirFiles[0].displayPath.lastIndexOf('/'))}</b>${touchedBadge} \u2014 <code>${bar}</code> ${coverage} (${dirFiles.length} files)`;
+    const tag = affected ? ' <code>changed</code>' : '';
+    return `<b>${dir}</b>${tag} \u2014 <code>${bar(pct)}</code> ${coverage} \u00B7 ${dirFiles.length} files`;
 }
 function fileLink(displayPath, repoUrl) {
     const name = fileName(displayPath);
     if (!repoUrl)
-        return name;
-    return `[${name}](${repoUrl}/${displayPath} "${displayPath}")`;
+        return `\`${name}\``;
+    return `[\`${name}\`](${repoUrl}/${displayPath} "${displayPath}")`;
 }
 function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl) {
     dirFiles.sort((a, b) => {
@@ -240,20 +221,18 @@ function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl) {
     const rows = [];
     if (hasDelta) {
         rows.push('| File | Lines | Methods | Branches | CRAP | Delta |');
-        rows.push('|------|------:|--------:|---------:|-----:|-------|');
+        rows.push('|------|------:|--------:|---------:|-----:|------:|');
     }
     else {
         rows.push('| File | Lines | Methods | Branches | CRAP |');
         rows.push('|------|------:|--------:|---------:|-----:|');
     }
     for (const f of dirFiles) {
-        const name = fileLink(f.displayPath, repoUrl);
-        const linePct = (0, types_1.percentage)(f.metrics.coveredStatements, f.metrics.statements);
-        const icon = healthIcon(linePct);
+        const link = fileLink(f.displayPath, repoUrl);
         const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute);
         const methods = fmt(f.metrics.coveredMethods, f.metrics.methods, showAbsolute);
         const branches = fmt(f.metrics.coveredConditionals, f.metrics.conditionals, showAbsolute);
-        const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '-';
+        const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '\u2014';
         if (hasDelta) {
             const baseFile = baseFiles.get(f.displayPath);
             let deltaCol;
@@ -263,12 +242,12 @@ function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl) {
                 deltaCol = deltaStr(curPct, basePct);
             }
             else {
-                deltaCol = ':sparkles: new';
+                deltaCol = '`new`';
             }
-            rows.push(`| ${icon} ${name} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`);
+            rows.push(`| ${link} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`);
         }
         else {
-            rows.push(`| ${icon} ${name} | ${lines} | ${methods} | ${branches} | ${crap} |`);
+            rows.push(`| ${link} | ${lines} | ${methods} | ${branches} | ${crap} |`);
         }
     }
     return rows.join('\n');
@@ -296,7 +275,7 @@ function fileTable(files, baseFiles, showAbsolute, onlyChanged, changedFiles, re
         const dirFiles = groups.get(dir);
         const affected = isDirAffected(dir, changedFiles);
         const openAttr = affected ? ' open' : '';
-        const summary = dirSummaryLine(dirFiles, showAbsolute, affected);
+        const summary = dirSummary(dir, dirFiles, showAbsolute, affected);
         const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl);
         sections.push(`<details${openAttr}>\n<summary>${summary}</summary>\n\n${table}\n\n</details>`);
     }
@@ -313,18 +292,17 @@ function topCrapTable(methods, threshold, limit, repoUrl) {
         '',
         '---',
         '',
-        `#### :rotating_light: Top CRAP Methods (threshold \u2265 ${threshold})`,
+        `#### Risky Methods \u2014 CRAP \u2265 ${threshold}`,
         '',
         '| Method | File | CRAP | Coverage | Complexity |',
         '|--------|------|-----:|---------:|-----------:|',
     ];
     for (const m of risky) {
-        const coverage = (0, types_1.percentage)(m.coveredLines, m.lineCount);
-        const icon = healthIcon(coverage);
+        const cov = (0, types_1.percentage)(m.coveredLines, m.lineCount);
         const fileRef = repoUrl
-            ? `[${fileName(m.file)}](${repoUrl}/${m.file} "${m.file}")`
-            : fileName(m.file);
-        rows.push(`| ${icon} \`${m.className}::${m.name}\` | ${fileRef} | **${m.crap}** | ${coverage}% | ${m.complexity} |`);
+            ? `[\`${fileName(m.file)}\`](${repoUrl}/${m.file} "${m.file}")`
+            : `\`${fileName(m.file)}\``;
+        rows.push(`| \`${m.className}::${m.name}\` | ${fileRef} | **${m.crap}** | ${cov}% | ${m.complexity} |`);
     }
     return rows.join('\n');
 }
@@ -347,28 +325,24 @@ function distributionChart(files) {
         '',
         '---',
         '',
-        '#### Coverage Distribution',
+        '<details>',
+        '<summary><b>Coverage Distribution</b></summary>',
         '',
         '```',
     ];
-    rows.push('Cover ' +
-        '\u250c' +
-        '\u2500'.repeat(barWidth + 2) +
-        '\u2510' +
-        ' Freq.');
     for (let i = 0; i <= 10; i++) {
-        const label = `${(i * 10).toString().padStart(3)}%`;
-        const freq = totalFiles > 0 ? (buckets[i] / totalFiles) * 100 : 0;
+        const lo = i * 10;
+        const hi = i === 10 ? 100 : lo + 9;
+        const label = `${lo.toString().padStart(3)}-${hi.toString().padStart(3)}%`;
         const filled = maxFreq > 0 ? Math.round((buckets[i] / maxFreq) * barWidth) : 0;
-        const bar = BLOCK_FULL.repeat(filled) + BLOCK_LIGHT.repeat(barWidth - filled);
-        rows.push(`${label} \u2502 ${bar} \u2502 ${buckets[i].toString().padStart(3)} (${freq.toFixed(1)}%)`);
+        const b = CHAR_FILLED.repeat(filled) + ' '.repeat(barWidth - filled);
+        rows.push(`  ${label}  ${b}  ${buckets[i]}`);
     }
-    rows.push('     ' +
-        ' \u2514' +
-        '\u2500'.repeat(barWidth + 2) +
-        '\u2518');
-    rows.push(`       ${totalFiles} files analyzed`);
     rows.push('```');
+    rows.push('');
+    rows.push(`${totalFiles} files analyzed`);
+    rows.push('');
+    rows.push('</details>');
     return rows.join('\n');
 }
 function formatReport(current, options) {
@@ -377,14 +351,13 @@ function formatReport(current, options) {
         ? options.commitSha.substring(0, 7)
         : 'unknown';
     const overallPct = (0, types_1.percentage)(current.projectMetrics.coveredStatements, current.projectMetrics.statements);
-    const badge = statusBadge(overallPct);
-    parts.push(`### ${badge} Coverage Report for \`${shortSha}\``);
+    parts.push(`## Coverage Report \u2014 \`${shortSha}\` \u2014 ${overallPct}% ${coverageLabel(overallPct)}`);
     parts.push('');
     parts.push(summaryTable(current.projectMetrics, options.baseReport?.projectMetrics || null, options.showAbsoluteNumbers));
     parts.push('');
     parts.push('---');
     parts.push('');
-    parts.push('#### :open_file_folder: Files');
+    parts.push('#### Files');
     parts.push('');
     const baseFileMap = options.baseReport
         ? new Map(options.baseReport.files.map((f) => [f.displayPath, f]))
@@ -405,7 +378,7 @@ function formatReport(current, options) {
     })).size;
     parts.push('');
     parts.push('---');
-    parts.push(`<sub>${options.signature} \u2022 ${totalFiles} files across ${totalDirs} directories \u2022 ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC</sub>`);
+    parts.push(`<sub>${options.signature} \u2022 ${totalFiles} files \u2022 ${totalDirs} directories \u2022 ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC</sub>`);
     return parts.join('\n');
 }
 //# sourceMappingURL=formatter.js.map
