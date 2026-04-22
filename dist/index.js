@@ -174,7 +174,61 @@ function fileName(displayPath) {
     const lastSlash = displayPath.lastIndexOf('/');
     return lastSlash >= 0 ? displayPath.substring(lastSlash + 1) : displayPath;
 }
-function fileTable(files, baseFiles, showAbsolute, onlyChanged) {
+function isDirAffected(dir, changedFiles) {
+    if (changedFiles.length === 0)
+        return true;
+    return changedFiles.some((f) => f.startsWith(dir + '/') || f === dir);
+}
+function dirSummaryMetrics(dirFiles, showAbsolute) {
+    let totalStmts = 0;
+    let coveredStmts = 0;
+    for (const f of dirFiles) {
+        totalStmts += f.metrics.statements;
+        coveredStmts += f.metrics.coveredStatements;
+    }
+    return fmt(coveredStmts, totalStmts, showAbsolute);
+}
+function buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta) {
+    dirFiles.sort((a, b) => {
+        const aPct = (0, types_1.percentage)(a.metrics.coveredStatements, a.metrics.statements);
+        const bPct = (0, types_1.percentage)(b.metrics.coveredStatements, b.metrics.statements);
+        return aPct - bPct;
+    });
+    const rows = [];
+    if (hasDelta) {
+        rows.push('| File | Lines | Methods | Branches | CRAP | Delta |');
+        rows.push('|------|-------|---------|----------|------|-------|');
+    }
+    else {
+        rows.push('| File | Lines | Methods | Branches | CRAP |');
+        rows.push('|------|-------|---------|----------|------|');
+    }
+    for (const f of dirFiles) {
+        const name = fileName(f.displayPath);
+        const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute);
+        const methods = fmt(f.metrics.coveredMethods, f.metrics.methods, showAbsolute);
+        const branches = fmt(f.metrics.coveredConditionals, f.metrics.conditionals, showAbsolute);
+        const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '-';
+        if (hasDelta) {
+            const baseFile = baseFiles.get(f.displayPath);
+            let deltaCol;
+            if (baseFile) {
+                const curPct = (0, types_1.percentage)(f.metrics.coveredStatements, f.metrics.statements);
+                const basePct = (0, types_1.percentage)(baseFile.metrics.coveredStatements, baseFile.metrics.statements);
+                deltaCol = deltaStr(curPct, basePct);
+            }
+            else {
+                deltaCol = ':sparkles: new';
+            }
+            rows.push(`| ${name} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`);
+        }
+        else {
+            rows.push(`| ${name} | ${lines} | ${methods} | ${branches} | ${crap} |`);
+        }
+    }
+    return rows.join('\n');
+}
+function fileTable(files, baseFiles, showAbsolute, onlyChanged, changedFiles) {
     let filteredFiles = files.filter((f) => f.metrics.statements > 0 || f.metrics.methods > 0);
     if (onlyChanged && baseFiles) {
         filteredFiles = filteredFiles.filter((f) => {
@@ -192,49 +246,17 @@ function fileTable(files, baseFiles, showAbsolute, onlyChanged) {
     const hasDelta = baseFiles !== null;
     const groups = groupByDirectory(filteredFiles);
     const sortedDirs = Array.from(groups.keys()).sort();
-    const rows = [];
-    const emptyCols = hasDelta ? '| | | | | |' : '| | | | |';
-    if (hasDelta) {
-        rows.push('| File | Lines | Methods | Branches | CRAP | Delta |');
-        rows.push('|------|-------|---------|----------|------|-------|');
-    }
-    else {
-        rows.push('| File | Lines | Methods | Branches | CRAP |');
-        rows.push('|------|-------|---------|----------|------|');
-    }
+    const sections = [];
     for (const dir of sortedDirs) {
         const dirFiles = groups.get(dir);
-        dirFiles.sort((a, b) => {
-            const aPct = (0, types_1.percentage)(a.metrics.coveredStatements, a.metrics.statements);
-            const bPct = (0, types_1.percentage)(b.metrics.coveredStatements, b.metrics.statements);
-            return aPct - bPct;
-        });
-        rows.push(`| **${dir}** ${emptyCols}`);
-        for (const f of dirFiles) {
-            const name = fileName(f.displayPath);
-            const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute);
-            const methods = fmt(f.metrics.coveredMethods, f.metrics.methods, showAbsolute);
-            const branches = fmt(f.metrics.coveredConditionals, f.metrics.conditionals, showAbsolute);
-            const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '-';
-            if (hasDelta) {
-                const baseFile = baseFiles.get(f.displayPath);
-                let deltaCol;
-                if (baseFile) {
-                    const curPct = (0, types_1.percentage)(f.metrics.coveredStatements, f.metrics.statements);
-                    const basePct = (0, types_1.percentage)(baseFile.metrics.coveredStatements, baseFile.metrics.statements);
-                    deltaCol = deltaStr(curPct, basePct);
-                }
-                else {
-                    deltaCol = ':sparkles: new';
-                }
-                rows.push(`| \u00A0\u00A0\u00A0\u00A0${name} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`);
-            }
-            else {
-                rows.push(`| \u00A0\u00A0\u00A0\u00A0${name} | ${lines} | ${methods} | ${branches} | ${crap} |`);
-            }
-        }
+        const affected = isDirAffected(dir, changedFiles);
+        const openAttr = affected ? ' open' : '';
+        const dirCoverage = dirSummaryMetrics(dirFiles, showAbsolute);
+        const fileCount = dirFiles.length;
+        const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta);
+        sections.push(`<details${openAttr}>\n<summary><b>${dir}</b> — ${dirCoverage} (${fileCount} files)</summary>\n\n${table}\n\n</details>`);
     }
-    return rows.join('\n');
+    return sections.join('\n\n');
 }
 function topCrapTable(methods, threshold, limit) {
     const risky = methods
@@ -305,7 +327,7 @@ function formatReport(current, options) {
     const baseFileMap = options.baseReport
         ? new Map(options.baseReport.files.map((f) => [f.displayPath, f]))
         : null;
-    parts.push(fileTable(current.files, baseFileMap, options.showAbsoluteNumbers, options.onlyChangedFiles));
+    parts.push(fileTable(current.files, baseFileMap, options.showAbsoluteNumbers, options.onlyChangedFiles, options.changedFiles));
     const crapSection = topCrapTable(current.allMethods, options.crapThreshold, options.topCrapLimit);
     if (crapSection)
         parts.push(crapSection);
@@ -398,6 +420,24 @@ async function run() {
         const commitSha = github.context.payload.pull_request?.head?.sha ||
             github.context.sha ||
             'unknown';
+        let changedFiles = [];
+        const prNumber = github.context.payload.pull_request?.number;
+        const token = process.env.GITHUB_TOKEN || core.getInput('github-token');
+        if (prNumber && token) {
+            try {
+                const octokit = github.getOctokit(token);
+                const { data: prFiles } = await octokit.rest.pulls.listFiles({
+                    ...github.context.repo,
+                    pull_number: prNumber,
+                    per_page: 300,
+                });
+                changedFiles = prFiles.map((f) => f.filename);
+                core.info(`PR touches ${changedFiles.length} files`);
+            }
+            catch {
+                core.info('Could not fetch PR files, all groups will be open.');
+            }
+        }
         const markdown = (0, formatter_1.formatReport)(current, {
             showAbsoluteNumbers,
             withChart,
@@ -407,6 +447,7 @@ async function run() {
             signature,
             commitSha,
             baseReport,
+            changedFiles,
         });
         await (0, comment_1.postComment)(markdown, signature);
         const lineCoverage = (0, types_1.percentage)(current.projectMetrics.coveredStatements, current.projectMetrics.statements);

@@ -16,6 +16,7 @@ interface FormatterOptions {
   signature: string
   commitSha: string
   baseReport: CoverageReport | null
+  changedFiles: string[]
 }
 
 function fmt(covered: number, total: number, showAbsolute: boolean): string {
@@ -104,11 +105,78 @@ function fileName(displayPath: string): string {
   return lastSlash >= 0 ? displayPath.substring(lastSlash + 1) : displayPath
 }
 
+function isDirAffected(dir: string, changedFiles: string[]): boolean {
+  if (changedFiles.length === 0) return true
+  return changedFiles.some((f) => f.startsWith(dir + '/') || f === dir)
+}
+
+function dirSummaryMetrics(
+  dirFiles: FileMetrics[],
+  showAbsolute: boolean,
+): string {
+  let totalStmts = 0
+  let coveredStmts = 0
+  for (const f of dirFiles) {
+    totalStmts += f.metrics.statements
+    coveredStmts += f.metrics.coveredStatements
+  }
+  return fmt(coveredStmts, totalStmts, showAbsolute)
+}
+
+function buildDirTable(
+  dirFiles: FileMetrics[],
+  baseFiles: Map<string, FileMetrics> | null,
+  showAbsolute: boolean,
+  hasDelta: boolean,
+): string {
+  dirFiles.sort((a, b) => {
+    const aPct = percentage(a.metrics.coveredStatements, a.metrics.statements)
+    const bPct = percentage(b.metrics.coveredStatements, b.metrics.statements)
+    return aPct - bPct
+  })
+
+  const rows: string[] = []
+
+  if (hasDelta) {
+    rows.push('| File | Lines | Methods | Branches | CRAP | Delta |')
+    rows.push('|------|-------|---------|----------|------|-------|')
+  } else {
+    rows.push('| File | Lines | Methods | Branches | CRAP |')
+    rows.push('|------|-------|---------|----------|------|')
+  }
+
+  for (const f of dirFiles) {
+    const name = fileName(f.displayPath)
+    const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute)
+    const methods = fmt(f.metrics.coveredMethods, f.metrics.methods, showAbsolute)
+    const branches = fmt(f.metrics.coveredConditionals, f.metrics.conditionals, showAbsolute)
+    const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '-'
+
+    if (hasDelta) {
+      const baseFile = baseFiles!.get(f.displayPath)
+      let deltaCol: string
+      if (baseFile) {
+        const curPct = percentage(f.metrics.coveredStatements, f.metrics.statements)
+        const basePct = percentage(baseFile.metrics.coveredStatements, baseFile.metrics.statements)
+        deltaCol = deltaStr(curPct, basePct)
+      } else {
+        deltaCol = ':sparkles: new'
+      }
+      rows.push(`| ${name} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`)
+    } else {
+      rows.push(`| ${name} | ${lines} | ${methods} | ${branches} | ${crap} |`)
+    }
+  }
+
+  return rows.join('\n')
+}
+
 function fileTable(
   files: FileMetrics[],
   baseFiles: Map<string, FileMetrics> | null,
   showAbsolute: boolean,
   onlyChanged: boolean,
+  changedFiles: string[],
 ): string {
   let filteredFiles = files.filter(
     (f) => f.metrics.statements > 0 || f.metrics.methods > 0,
@@ -118,14 +186,8 @@ function fileTable(
     filteredFiles = filteredFiles.filter((f) => {
       const baseFile = baseFiles.get(f.displayPath)
       if (!baseFile) return true
-      const curLine = percentage(
-        f.metrics.coveredStatements,
-        f.metrics.statements,
-      )
-      const baseLine = percentage(
-        baseFile.metrics.coveredStatements,
-        baseFile.metrics.statements,
-      )
+      const curLine = percentage(f.metrics.coveredStatements, f.metrics.statements)
+      const baseLine = percentage(baseFile.metrics.coveredStatements, baseFile.metrics.statements)
       return Math.abs(curLine - baseLine) >= 0.01
     })
   }
@@ -138,80 +200,23 @@ function fileTable(
   const groups = groupByDirectory(filteredFiles)
   const sortedDirs = Array.from(groups.keys()).sort()
 
-  const rows: string[] = []
-  const emptyCols = hasDelta ? '| | | | | |' : '| | | | |'
-
-  if (hasDelta) {
-    rows.push('| File | Lines | Methods | Branches | CRAP | Delta |')
-    rows.push('|------|-------|---------|----------|------|-------|')
-  } else {
-    rows.push('| File | Lines | Methods | Branches | CRAP |')
-    rows.push('|------|-------|---------|----------|------|')
-  }
+  const sections: string[] = []
 
   for (const dir of sortedDirs) {
     const dirFiles = groups.get(dir)!
-    dirFiles.sort((a, b) => {
-      const aPct = percentage(
-        a.metrics.coveredStatements,
-        a.metrics.statements,
-      )
-      const bPct = percentage(
-        b.metrics.coveredStatements,
-        b.metrics.statements,
-      )
-      return aPct - bPct
-    })
+    const affected = isDirAffected(dir, changedFiles)
+    const openAttr = affected ? ' open' : ''
+    const dirCoverage = dirSummaryMetrics(dirFiles, showAbsolute)
+    const fileCount = dirFiles.length
 
-    rows.push(`| **${dir}** ${emptyCols}`)
+    const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta)
 
-    for (const f of dirFiles) {
-      const name = fileName(f.displayPath)
-      const lines = fmt(
-        f.metrics.coveredStatements,
-        f.metrics.statements,
-        showAbsolute,
-      )
-      const methods = fmt(
-        f.metrics.coveredMethods,
-        f.metrics.methods,
-        showAbsolute,
-      )
-      const branches = fmt(
-        f.metrics.coveredConditionals,
-        f.metrics.conditionals,
-        showAbsolute,
-      )
-      const crap = f.averageCrap > 0 ? f.averageCrap.toString() : '-'
-
-      if (hasDelta) {
-        const baseFile = baseFiles!.get(f.displayPath)
-        let deltaCol: string
-        if (baseFile) {
-          const curPct = percentage(
-            f.metrics.coveredStatements,
-            f.metrics.statements,
-          )
-          const basePct = percentage(
-            baseFile.metrics.coveredStatements,
-            baseFile.metrics.statements,
-          )
-          deltaCol = deltaStr(curPct, basePct)
-        } else {
-          deltaCol = ':sparkles: new'
-        }
-        rows.push(
-          `| \u00A0\u00A0\u00A0\u00A0${name} | ${lines} | ${methods} | ${branches} | ${crap} | ${deltaCol} |`,
-        )
-      } else {
-        rows.push(
-          `| \u00A0\u00A0\u00A0\u00A0${name} | ${lines} | ${methods} | ${branches} | ${crap} |`,
-        )
-      }
-    }
+    sections.push(
+      `<details${openAttr}>\n<summary><b>${dir}</b> — ${dirCoverage} (${fileCount} files)</summary>\n\n${table}\n\n</details>`,
+    )
   }
 
-  return rows.join('\n')
+  return sections.join('\n\n')
 }
 
 function topCrapTable(
@@ -326,6 +331,7 @@ export function formatReport(
       baseFileMap,
       options.showAbsoluteNumbers,
       options.onlyChangedFiles,
+      options.changedFiles,
     ),
   )
 

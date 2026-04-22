@@ -46,6 +46,24 @@ async function run(): Promise<void> {
       github.context.sha ||
       'unknown'
 
+    let changedFiles: string[] = []
+    const prNumber = github.context.payload.pull_request?.number
+    const token = process.env.GITHUB_TOKEN || core.getInput('github-token')
+    if (prNumber && token) {
+      try {
+        const octokit = github.getOctokit(token)
+        const {data: prFiles} = await octokit.rest.pulls.listFiles({
+          ...github.context.repo,
+          pull_number: prNumber,
+          per_page: 300,
+        })
+        changedFiles = prFiles.map((f) => f.filename)
+        core.info(`PR touches ${changedFiles.length} files`)
+      } catch {
+        core.info('Could not fetch PR files, all groups will be open.')
+      }
+    }
+
     const markdown = formatReport(current, {
       showAbsoluteNumbers,
       withChart,
@@ -55,6 +73,7 @@ async function run(): Promise<void> {
       signature,
       commitSha,
       baseReport,
+      changedFiles,
     })
 
     await postComment(markdown, signature)
