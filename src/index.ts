@@ -4,7 +4,7 @@ import * as fs from 'fs'
 import {parseCloverXml} from './parser'
 import {formatReport} from './formatter'
 import {postComment} from './comment'
-import {downloadBaseline, artifactName} from './baseline'
+import {downloadBaseline, uploadBaseline} from './baseline'
 import {percentage} from './types'
 
 async function run(): Promise<void> {
@@ -24,6 +24,7 @@ async function run(): Promise<void> {
     const showAbsoluteNumbers =
       core.getInput('show-absolute-numbers') !== 'false'
     const onlyChangedFiles = core.getInput('only-changed-files') === 'true'
+    const groupDepth = parseInt(core.getInput('group-depth') || '3', 10)
     const signature = core.getInput('signature') || 'saci-coverage-report'
 
     if (!fs.existsSync(file)) {
@@ -36,16 +37,8 @@ async function run(): Promise<void> {
 
     if (baselineMode && isPush) {
       const branch = process.env.GITHUB_REF_NAME || 'unknown'
-      const name = artifactName(branch)
-      core.setOutput('baseline-artifact-name', name)
-      core.setOutput('baseline-artifact-path', file)
-      core.setOutput('baseline-retention-days', baselineRetentionDays.toString())
-      core.info(
-        `Push event detected with baseline-mode. ` +
-        `Use actions/upload-artifact to upload "${name}" with path "${file}" ` +
-        `(retention: ${baselineRetentionDays} days). ` +
-        `Or use the outputs of this step in a subsequent upload-artifact step.`,
-      )
+      core.info(`Uploading coverage baseline for branch "${branch}"...`)
+      await uploadBaseline(file, branch, baselineRetentionDays)
     }
 
     const workspacePrefix = process.env.GITHUB_WORKSPACE
@@ -111,6 +104,7 @@ async function run(): Promise<void> {
       crapThreshold,
       topCrapLimit,
       onlyChangedFiles,
+      groupDepth,
       signature,
       commitSha,
       baseReport,

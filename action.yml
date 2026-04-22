@@ -17,10 +17,6 @@ inputs:
     description: 'Automatically manage baseline artifacts. On push events uploads the coverage as a baseline artifact; on pull_request events downloads the baseline from the target branch for comparison. Replaces the need for manual upload/download artifact steps.'
     required: false
     default: 'false'
-  baseline-artifact-name:
-    description: 'Custom prefix for the baseline artifact name. The branch name is appended automatically.'
-    required: false
-    default: 'saci-coverage-baseline'
   baseline-retention-days:
     description: 'Number of days to retain baseline artifacts'
     required: false
@@ -57,6 +53,10 @@ inputs:
     description: 'Only show files with coverage changes in the table (requires base-file or baseline-mode)'
     required: false
     default: 'false'
+  group-depth:
+    description: 'Number of directory segments used for file grouping (e.g. 3 = app/Http/Controllers)'
+    required: false
+    default: '3'
   signature:
     description: 'Custom signature at the bottom of the comment'
     required: false

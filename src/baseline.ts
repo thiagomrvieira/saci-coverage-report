@@ -1,5 +1,6 @@
 import * as core from '@actions/core'
 import * as github from '@actions/github'
+import {DefaultArtifactClient} from '@actions/artifact'
 import * as fs from 'fs'
 import * as path from 'path'
 import {execSync} from 'child_process'
@@ -15,6 +16,23 @@ function getOctokit() {
   const token = process.env.GITHUB_TOKEN || core.getInput('github-token')
   if (!token) throw new Error('GITHUB_TOKEN is required for baseline-mode')
   return github.getOctokit(token)
+}
+
+export async function uploadBaseline(
+  coverageFilePath: string,
+  branch: string,
+  retentionDays: number,
+): Promise<void> {
+  const client = new DefaultArtifactClient()
+  const name = artifactName(branch)
+  const resolvedPath = path.resolve(coverageFilePath)
+  const rootDirectory = path.dirname(resolvedPath)
+
+  await client.uploadArtifact(name, [resolvedPath], rootDirectory, {
+    retentionDays,
+  })
+
+  core.info(`Uploaded baseline artifact "${name}" from ${resolvedPath}`)
 }
 
 export async function downloadBaseline(
