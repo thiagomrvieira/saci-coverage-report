@@ -211,11 +211,10 @@ function dirSummary(dir, dirFiles, showAbsolute, affected, changedCount) {
     const coverage = showAbsolute && totalStmts > 0
         ? `${pct}% (${coveredStmts}/${totalStmts})`
         : `${pct}%`;
-    let tag = '';
-    if (affected && changedCount > 0) {
-        tag = ` <code>${changedCount} of ${dirFiles.length} changed</code>`;
-    }
-    return `<b>${dir}</b>${tag} \u2014 <code>${bar(pct)}</code> ${coverage} \u00B7 ${dirFiles.length} files`;
+    const changedSuffix = affected && changedCount > 0
+        ? ` \u2014 ${changedCount} file${changedCount > 1 ? 's' : ''} changed`
+        : '';
+    return `<b>${dir}</b> <code>${bar(pct)}</code> ${coverage} \u00B7 ${dirFiles.length} files${changedSuffix}`;
 }
 function fileLink(displayPath, repoUrl) {
     const name = fileName(displayPath);
