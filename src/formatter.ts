@@ -13,6 +13,7 @@ interface FormatterOptions {
   crapThreshold: number
   topCrapLimit: number
   onlyChangedFiles: boolean
+  groupDepth: number
   signature: string
   commitSha: string
   baseReport: CoverageReport | null
@@ -103,27 +104,43 @@ function summaryTable(
   return rows.join('\n')
 }
 
+function truncateDir(fullDir: string, depth: number): string {
+  if (depth <= 0) return fullDir
+  const parts = fullDir.split('/')
+  return parts.length <= depth ? fullDir : parts.slice(0, depth).join('/')
+}
+
 function groupByDirectory(
   files: FileMetrics[],
+  depth: number,
 ): Map<string, FileMetrics[]> {
   const groups = new Map<string, FileMetrics[]>()
   for (const f of files) {
     const lastSlash = f.displayPath.lastIndexOf('/')
-    const dir = lastSlash >= 0 ? f.displayPath.substring(0, lastSlash) : '.'
+    const fullDir = lastSlash >= 0 ? f.displayPath.substring(0, lastSlash) : '.'
+    const dir = fullDir === '.' ? '.' : truncateDir(fullDir, depth)
     if (!groups.has(dir)) groups.set(dir, [])
     groups.get(dir)!.push(f)
   }
   return groups
 }
 
-function fileName(displayPath: string): string {
-  const lastSlash = displayPath.lastIndexOf('/')
-  return lastSlash >= 0 ? displayPath.substring(lastSlash + 1) : displayPath
+function fileDisplayName(displayPath: string, groupDir: string): string {
+  if (groupDir === '.') return displayPath
+  const prefix = groupDir + '/'
+  return displayPath.startsWith(prefix)
+    ? displayPath.substring(prefix.length)
+    : displayPath
 }
 
-function isDirAffected(dir: string, changedFiles: string[]): boolean {
+function isDirAffected(dir: string, changedFiles: string[], depth: number): boolean {
   if (changedFiles.length === 0) return true
-  return changedFiles.some((f) => f.startsWith(dir + '/') || f === dir)
+  return changedFiles.some((f) => {
+    const lastSlash = f.lastIndexOf('/')
+    const fileDir = lastSlash >= 0 ? f.substring(0, lastSlash) : '.'
+    const truncated = fileDir === '.' ? '.' : truncateDir(fileDir, depth)
+    return truncated === dir
+  })
 }
 
 function countChangedInDir(dir: string, dirFiles: FileMetrics[], changedFiles: string[]): number {
@@ -158,8 +175,8 @@ function dirSummary(
   return `<b>${dir}</b> <code>${bar(pct)}</code> ${coverage} \u00B7 ${pl(dirFiles.length, 'file')}${changedSuffix}`
 }
 
-function fileLink(displayPath: string, repoUrl: string): string {
-  const name = fileName(displayPath)
+function fileLink(displayPath: string, groupDir: string, repoUrl: string): string {
+  const name = fileDisplayName(displayPath, groupDir)
   if (!repoUrl) return `\`${name}\``
   return `[\`${name}\`](${repoUrl}/${displayPath} "${displayPath}")`
 }
@@ -169,6 +186,7 @@ function buildDirTable(
   baseFiles: Map<string, FileMetrics> | null,
   showAbsolute: boolean,
   hasDelta: boolean,
+  groupDir: string,
   repoUrl: string,
   changedFiles: string[],
 ): string {
@@ -194,7 +212,7 @@ function buildDirTable(
   }
 
   for (const f of dirFiles) {
-    const link = fileLink(f.displayPath, repoUrl)
+    const link = fileLink(f.displayPath, groupDir, repoUrl)
     const changed = isFileChanged(f.displayPath, changedFiles)
     const tag = changed ? ' `changed`' : ''
     const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute)
@@ -221,6 +239,24 @@ function buildDirTable(
   return rows.join('\n')
 }
 
+function buildGroupSection(
+  dir: string,
+  dirFiles: FileMetrics[],
+  baseFiles: Map<string, FileMetrics> | null,
+  showAbsolute: boolean,
+  hasDelta: boolean,
+  repoUrl: string,
+  changedFiles: string[],
+  open: boolean,
+): string {
+  const affected = open
+  const changedCount = countChangedInDir(dir, dirFiles, changedFiles)
+  const summary = dirSummary(dir, dirFiles, showAbsolute, affected, changedCount)
+  const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, dir, repoUrl, changedFiles)
+  const openAttr = open ? ' open' : ''
+  return `<details${openAttr}>\n<summary>${summary}</summary>\n\n${table}\n\n</details>`
+}
+
 function fileTable(
   files: FileMetrics[],
   baseFiles: Map<string, FileMetrics> | null,
@@ -228,6 +264,7 @@ function fileTable(
   onlyChanged: boolean,
   changedFiles: string[],
   repoUrl: string,
+  groupDepth: number,
 ): string {
   let filteredFiles = files.filter(
     (f) => f.metrics.statements > 0 || f.metrics.methods > 0,
@@ -248,25 +285,39 @@ function fileTable(
   }
 
   const hasDelta = baseFiles !== null
-  const groups = groupByDirectory(filteredFiles)
+  const groups = groupByDirectory(filteredFiles, groupDepth)
   const sortedDirs = Array.from(groups.keys()).sort()
 
-  const sections: string[] = []
+  const affectedSections: string[] = []
+  const unaffectedSections: string[] = []
+  let unaffectedFileCount = 0
 
   for (const dir of sortedDirs) {
     const dirFiles = groups.get(dir)!
-    const affected = isDirAffected(dir, changedFiles)
-    const changedCount = countChangedInDir(dir, dirFiles, changedFiles)
-    const openAttr = affected ? ' open' : ''
-    const summary = dirSummary(dir, dirFiles, showAbsolute, affected, changedCount)
-    const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles)
+    const affected = isDirAffected(dir, changedFiles, groupDepth)
 
-    sections.push(
-      `<details${openAttr}>\n<summary>${summary}</summary>\n\n${table}\n\n</details>`,
+    if (affected) {
+      affectedSections.push(
+        buildGroupSection(dir, dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles, true),
+      )
+    } else {
+      unaffectedFileCount += dirFiles.length
+      unaffectedSections.push(
+        buildGroupSection(dir, dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles, false),
+      )
+    }
+  }
+
+  const parts: string[] = [...affectedSections]
+
+  if (unaffectedSections.length > 0) {
+    const label = `${pl(unaffectedSections.length, 'unaffected directory', 'unaffected directories')} (${pl(unaffectedFileCount, 'file')})`
+    parts.push(
+      `<details>\n<summary><b>${label}</b></summary>\n\n${unaffectedSections.join('\n\n')}\n\n</details>`,
     )
   }
 
-  return sections.join('\n\n')
+  return parts.join('\n\n')
 }
 
 function topCrapTable(
@@ -397,6 +448,7 @@ export function formatReport(
       options.onlyChangedFiles,
       options.changedFiles,
       options.repoUrl,
+      options.groupDepth,
     ),
   )
 
