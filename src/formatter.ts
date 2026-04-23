@@ -18,7 +18,6 @@ interface FormatterOptions {
   baseReport: CoverageReport | null
   changedFiles: string[]
   repoUrl: string
-  groupDepth: number
 }
 
 function pl(n: number, singular: string, plural?: string): string {
@@ -104,43 +103,27 @@ function summaryTable(
   return rows.join('\n')
 }
 
-function truncateDir(dirPath: string, depth: number): string {
-  const parts = dirPath.split('/')
-  return parts.length <= depth ? dirPath : parts.slice(0, depth).join('/')
-}
-
 function groupByDirectory(
   files: FileMetrics[],
-  depth: number,
 ): Map<string, FileMetrics[]> {
   const groups = new Map<string, FileMetrics[]>()
   for (const f of files) {
     const lastSlash = f.displayPath.lastIndexOf('/')
-    const fullDir = lastSlash >= 0 ? f.displayPath.substring(0, lastSlash) : '.'
-    const dir = fullDir === '.' ? '.' : truncateDir(fullDir, depth)
+    const dir = lastSlash >= 0 ? f.displayPath.substring(0, lastSlash) : '.'
     if (!groups.has(dir)) groups.set(dir, [])
     groups.get(dir)!.push(f)
   }
   return groups
 }
 
-function fileDisplayName(displayPath: string, groupDir: string): string {
-  if (groupDir === '.') return displayPath
-  const prefix = groupDir + '/'
-  if (displayPath.startsWith(prefix)) {
-    return displayPath.substring(prefix.length)
-  }
-  return displayPath
+function fileName(displayPath: string): string {
+  const lastSlash = displayPath.lastIndexOf('/')
+  return lastSlash >= 0 ? displayPath.substring(lastSlash + 1) : displayPath
 }
 
-function isDirAffected(dir: string, changedFiles: string[], depth: number): boolean {
+function isDirAffected(dir: string, changedFiles: string[]): boolean {
   if (changedFiles.length === 0) return true
-  return changedFiles.some((f) => {
-    const lastSlash = f.lastIndexOf('/')
-    const fileDir = lastSlash >= 0 ? f.substring(0, lastSlash) : '.'
-    const truncated = fileDir === '.' ? '.' : truncateDir(fileDir, depth)
-    return truncated === dir
-  })
+  return changedFiles.some((f) => f.startsWith(dir + '/') || f === dir)
 }
 
 function countChangedInDir(dir: string, dirFiles: FileMetrics[], changedFiles: string[]): number {
@@ -175,8 +158,8 @@ function dirSummary(
   return `<b>${dir}</b> <code>${bar(pct)}</code> ${coverage} \u00B7 ${pl(dirFiles.length, 'file')}${changedSuffix}`
 }
 
-function fileLink(displayPath: string, groupDir: string, repoUrl: string): string {
-  const name = fileDisplayName(displayPath, groupDir)
+function fileLink(displayPath: string, repoUrl: string): string {
+  const name = fileName(displayPath)
   if (!repoUrl) return `\`${name}\``
   return `[\`${name}\`](${repoUrl}/${displayPath} "${displayPath}")`
 }
@@ -186,7 +169,6 @@ function buildDirTable(
   baseFiles: Map<string, FileMetrics> | null,
   showAbsolute: boolean,
   hasDelta: boolean,
-  groupDir: string,
   repoUrl: string,
   changedFiles: string[],
 ): string {
@@ -212,7 +194,7 @@ function buildDirTable(
   }
 
   for (const f of dirFiles) {
-    const link = fileLink(f.displayPath, groupDir, repoUrl)
+    const link = fileLink(f.displayPath, repoUrl)
     const changed = isFileChanged(f.displayPath, changedFiles)
     const tag = changed ? ' `changed`' : ''
     const lines = fmt(f.metrics.coveredStatements, f.metrics.statements, showAbsolute)
@@ -246,7 +228,6 @@ function fileTable(
   onlyChanged: boolean,
   changedFiles: string[],
   repoUrl: string,
-  groupDepth: number,
 ): string {
   let filteredFiles = files.filter(
     (f) => f.metrics.statements > 0 || f.metrics.methods > 0,
@@ -267,18 +248,18 @@ function fileTable(
   }
 
   const hasDelta = baseFiles !== null
-  const groups = groupByDirectory(filteredFiles, groupDepth)
+  const groups = groupByDirectory(filteredFiles)
   const sortedDirs = Array.from(groups.keys()).sort()
 
   const sections: string[] = []
 
   for (const dir of sortedDirs) {
     const dirFiles = groups.get(dir)!
-    const affected = isDirAffected(dir, changedFiles, groupDepth)
+    const affected = isDirAffected(dir, changedFiles)
     const changedCount = countChangedInDir(dir, dirFiles, changedFiles)
     const openAttr = affected ? ' open' : ''
     const summary = dirSummary(dir, dirFiles, showAbsolute, affected, changedCount)
-    const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, dir, repoUrl, changedFiles)
+    const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles)
 
     sections.push(
       `<details${openAttr}>\n<summary>${summary}</summary>\n\n${table}\n\n</details>`,
@@ -416,7 +397,6 @@ export function formatReport(
       options.onlyChangedFiles,
       options.changedFiles,
       options.repoUrl,
-      options.groupDepth,
     ),
   )
 

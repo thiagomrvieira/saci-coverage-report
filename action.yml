@@ -53,10 +53,6 @@ inputs:
     description: 'Only show files with coverage changes in the table (requires base-file or baseline-mode)'
     required: false
     default: 'false'
-  group-depth:
-    description: 'Number of directory segments used for file grouping (e.g. 3 = app/Http/Controllers)'
-    required: false
-    default: '3'
   signature:
     description: 'Custom signature at the bottom of the comment'
     required: false

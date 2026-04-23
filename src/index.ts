@@ -24,7 +24,6 @@ async function run(): Promise<void> {
     const showAbsoluteNumbers =
       core.getInput('show-absolute-numbers') !== 'false'
     const onlyChangedFiles = core.getInput('only-changed-files') === 'true'
-    const groupDepth = parseInt(core.getInput('group-depth') || '3', 10)
     const signature = core.getInput('signature') || 'saci-coverage-report'
 
     if (!fs.existsSync(file)) {
@@ -104,7 +103,6 @@ async function run(): Promise<void> {
       crapThreshold,
       topCrapLimit,
       onlyChangedFiles,
-      groupDepth,
       signature,
       commitSha,
       baseReport,
