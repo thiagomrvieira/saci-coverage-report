@@ -248,13 +248,42 @@ function buildGroupSection(
   repoUrl: string,
   changedFiles: string[],
   open: boolean,
+  changedOnly: boolean,
 ): string {
-  const affected = open
   const changedCount = countChangedInDir(dir, dirFiles, changedFiles)
-  const summary = dirSummary(dir, dirFiles, showAbsolute, affected, changedCount)
-  const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, dir, repoUrl, changedFiles)
+  const summary = dirSummary(dir, dirFiles, showAbsolute, open, changedCount)
+  const tableFiles = changedOnly
+    ? dirFiles.filter((f) => isFileChanged(f.displayPath, changedFiles))
+    : dirFiles
+  const table = buildDirTable(tableFiles, baseFiles, showAbsolute, hasDelta, dir, repoUrl, changedFiles)
   const openAttr = open ? ' open' : ''
   return `<details${openAttr}>\n<summary>${summary}</summary>\n\n${table}\n\n</details>`
+}
+
+function unaffectedOverviewTable(
+  groups: Map<string, FileMetrics[]>,
+  dirs: string[],
+  showAbsolute: boolean,
+): string {
+  const rows: string[] = [
+    '| Directory | | Coverage | Files |',
+    '|-----------|---|--------:|------:|',
+  ]
+  for (const dir of dirs) {
+    const dirFiles = groups.get(dir)!
+    let totalStmts = 0
+    let coveredStmts = 0
+    for (const f of dirFiles) {
+      totalStmts += f.metrics.statements
+      coveredStmts += f.metrics.coveredStatements
+    }
+    const pct = percentage(coveredStmts, totalStmts)
+    const coverage = showAbsolute && totalStmts > 0
+      ? `${pct}% (${coveredStmts}/${totalStmts})`
+      : `${pct}%`
+    rows.push(`| ${dir} | \`${bar(pct)}\` | ${coverage} | ${dirFiles.length} |`)
+  }
+  return rows.join('\n')
 }
 
 function fileTable(
@@ -289,7 +318,8 @@ function fileTable(
   const sortedDirs = Array.from(groups.keys()).sort()
 
   const affectedSections: string[] = []
-  const unaffectedSections: string[] = []
+  const unaffectedDirs: string[] = []
+  const unaffectedDetails: string[] = []
   let unaffectedFileCount = 0
 
   for (const dir of sortedDirs) {
@@ -298,22 +328,30 @@ function fileTable(
 
     if (affected) {
       affectedSections.push(
-        buildGroupSection(dir, dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles, true),
+        buildGroupSection(dir, dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles, true, true),
       )
     } else {
       unaffectedFileCount += dirFiles.length
-      unaffectedSections.push(
-        buildGroupSection(dir, dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles, false),
+      unaffectedDirs.push(dir)
+      unaffectedDetails.push(
+        buildGroupSection(dir, dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles, false, false),
       )
     }
   }
 
   const parts: string[] = [...affectedSections]
 
-  if (unaffectedSections.length > 0) {
-    const label = `${pl(unaffectedSections.length, 'unaffected directory', 'unaffected directories')} (${pl(unaffectedFileCount, 'file')})`
+  if (unaffectedDirs.length > 0) {
+    parts.push('')
+    parts.push('---')
+    parts.push('')
+    parts.push(`#### Unaffected Directories`)
+    parts.push('')
+    parts.push(unaffectedOverviewTable(groups, unaffectedDirs, showAbsolute))
+    parts.push('')
+    const expandLabel = `${pl(unaffectedDirs.length, 'directory', 'directories')} \u2014 expand for file details`
     parts.push(
-      `<details>\n<summary><b>${label}</b></summary>\n\n${unaffectedSections.join('\n\n')}\n\n</details>`,
+      `<details>\n<summary><b>${expandLabel}</b></summary>\n\n${unaffectedDetails.join('\n\n')}\n\n</details>`,
     )
   }
 
@@ -433,7 +471,7 @@ export function formatReport(
   parts.push('')
   parts.push('---')
   parts.push('')
-  parts.push('#### Files')
+  parts.push('#### Changed Files')
   parts.push('')
 
   const baseFileMap = options.baseReport
