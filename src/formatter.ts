@@ -260,30 +260,18 @@ function buildGroupSection(
   return `<details${openAttr}>\n<summary>${summary}</summary>\n\n${table}\n\n</details>`
 }
 
-function unaffectedOverviewTable(
-  groups: Map<string, FileMetrics[]>,
-  dirs: string[],
+function buildUnaffectedSection(
+  dir: string,
+  dirFiles: FileMetrics[],
+  baseFiles: Map<string, FileMetrics> | null,
   showAbsolute: boolean,
+  hasDelta: boolean,
+  repoUrl: string,
+  changedFiles: string[],
 ): string {
-  const rows: string[] = [
-    '| Directory | | Coverage | Files |',
-    '|-----------|---|--------:|------:|',
-  ]
-  for (const dir of dirs) {
-    const dirFiles = groups.get(dir)!
-    let totalStmts = 0
-    let coveredStmts = 0
-    for (const f of dirFiles) {
-      totalStmts += f.metrics.statements
-      coveredStmts += f.metrics.coveredStatements
-    }
-    const pct = percentage(coveredStmts, totalStmts)
-    const coverage = showAbsolute && totalStmts > 0
-      ? `${pct}% (${coveredStmts}/${totalStmts})`
-      : `${pct}%`
-    rows.push(`| ${dir} | \`${bar(pct)}\` | ${coverage} | ${dirFiles.length} |`)
-  }
-  return rows.join('\n')
+  const summary = dirSummary(dir, dirFiles, showAbsolute, false, 0)
+  const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, dir, repoUrl, changedFiles)
+  return `<details>\n<summary>${summary}</summary>\n\n${table}\n\n</details>`
 }
 
 function fileTable(
@@ -318,8 +306,7 @@ function fileTable(
   const sortedDirs = Array.from(groups.keys()).sort()
 
   const affectedSections: string[] = []
-  const unaffectedDirs: string[] = []
-  const unaffectedDetails: string[] = []
+  const unaffectedSections: string[] = []
   let unaffectedFileCount = 0
 
   for (const dir of sortedDirs) {
@@ -332,26 +319,23 @@ function fileTable(
       )
     } else {
       unaffectedFileCount += dirFiles.length
-      unaffectedDirs.push(dir)
-      unaffectedDetails.push(
-        buildGroupSection(dir, dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles, false, false),
+      unaffectedSections.push(
+        buildUnaffectedSection(dir, dirFiles, baseFiles, showAbsolute, hasDelta, repoUrl, changedFiles),
       )
     }
   }
 
   const parts: string[] = [...affectedSections]
 
-  if (unaffectedDirs.length > 0) {
+  if (unaffectedSections.length > 0) {
     parts.push('')
     parts.push('---')
     parts.push('')
     parts.push(`#### Unaffected Directories`)
     parts.push('')
-    parts.push(unaffectedOverviewTable(groups, unaffectedDirs, showAbsolute))
-    parts.push('')
-    const expandLabel = `${pl(unaffectedDirs.length, 'directory', 'directories')} \u2014 expand for file details`
+    const label = `${pl(unaffectedSections.length, 'directory', 'directories')} \u00B7 ${pl(unaffectedFileCount, 'file')}`
     parts.push(
-      `<details>\n<summary><b>${expandLabel}</b></summary>\n\n${unaffectedDetails.join('\n\n')}\n\n</details>`,
+      `<details>\n<summary><b>${label}</b></summary>\n\n${unaffectedSections.join('\n\n')}\n\n</details>`,
     )
   }
 
