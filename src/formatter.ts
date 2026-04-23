@@ -181,6 +181,35 @@ function fileLink(displayPath: string, groupDir: string, repoUrl: string): strin
   return `[\`${name}\`](${repoUrl}/${displayPath} "${displayPath}")`
 }
 
+function methodDetailsBlock(file: FileMetrics, repoUrl: string): string {
+  const methods = file.methods
+  if (methods.length === 0) return '_No methods found._'
+
+  const sorted = [...methods].sort((a, b) => b.crap - a.crap)
+
+  const crapCol = '[CRAP](# "Change Risk Anti-Patterns")'
+  const rows: string[] = [
+    `| Method | Lines | Coverage | Complexity | ${crapCol} |`,
+    '|--------|------:|---------:|-----------:|-----:|',
+  ]
+
+  for (const m of sorted) {
+    const cov = percentage(m.coveredLines, m.lineCount)
+    const covStr = m.lineCount > 0 ? `${cov}% (${m.coveredLines}/${m.lineCount})` : '\u2014'
+    const crap = m.crap > 0 ? m.crap.toString() : '\u2014'
+    rows.push(
+      `| \`${m.name}\` | ${m.lineCount} | ${covStr} | ${m.complexity} | ${crap} |`,
+    )
+  }
+
+  const link = repoUrl
+    ? `[View source](${repoUrl}/${file.displayPath})`
+    : ''
+  if (link) rows.push('', link)
+
+  return rows.join('\n')
+}
+
 function buildDirTable(
   dirFiles: FileMetrics[],
   baseFiles: Map<string, FileMetrics> | null,
@@ -189,6 +218,7 @@ function buildDirTable(
   groupDir: string,
   repoUrl: string,
   changedFiles: string[],
+  expandChanged: boolean,
 ): string {
   dirFiles.sort((a, b) => {
     const aChanged = isFileChanged(a.displayPath, changedFiles) ? 0 : 1
@@ -236,7 +266,21 @@ function buildDirTable(
     }
   }
 
-  return rows.join('\n')
+  const parts: string[] = [rows.join('\n')]
+
+  if (expandChanged) {
+    const changedFilesInDir = dirFiles.filter((f) => isFileChanged(f.displayPath, changedFiles))
+    for (const f of changedFilesInDir) {
+      if (f.methods.length === 0) continue
+      const name = fileDisplayName(f.displayPath, groupDir)
+      const linePct = percentage(f.metrics.coveredStatements, f.metrics.statements)
+      const summaryLabel = `<code>${name}</code> \u2014 ${pl(f.methods.length, 'method')} \u00B7 ${linePct}% covered`
+      const details = methodDetailsBlock(f, repoUrl)
+      parts.push(`<details>\n<summary>${summaryLabel}</summary>\n\n${details}\n\n</details>`)
+    }
+  }
+
+  return parts.join('\n\n')
 }
 
 function buildGroupSection(
@@ -255,7 +299,7 @@ function buildGroupSection(
   const tableFiles = changedOnly
     ? dirFiles.filter((f) => isFileChanged(f.displayPath, changedFiles))
     : dirFiles
-  const table = buildDirTable(tableFiles, baseFiles, showAbsolute, hasDelta, dir, repoUrl, changedFiles)
+  const table = buildDirTable(tableFiles, baseFiles, showAbsolute, hasDelta, dir, repoUrl, changedFiles, changedOnly)
   const openAttr = open ? ' open' : ''
   return `<details${openAttr}>\n<summary>${summary}</summary>\n\n${table}\n\n</details>`
 }
@@ -270,7 +314,7 @@ function buildUnaffectedSection(
   changedFiles: string[],
 ): string {
   const summary = dirSummary(dir, dirFiles, showAbsolute, false, 0)
-  const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, dir, repoUrl, changedFiles)
+  const table = buildDirTable(dirFiles, baseFiles, showAbsolute, hasDelta, dir, repoUrl, changedFiles, false)
   return `<details>\n<summary>${summary}</summary>\n\n${table}\n\n</details>`
 }
 
